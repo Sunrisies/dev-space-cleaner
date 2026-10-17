@@ -35,6 +35,14 @@ npm run tauri dev
 
 ## 构建
 
+Windows 推荐使用安装包，安装后会创建“缓境 Huanj”开始菜单入口，可搜索中文名或英文名启动，并提供系统卸载入口：
+
+```sh
+npm run build:installer
+```
+
+安装包生成在 Cargo target 目录的 `release/bundle/nsis/`。使用当前用户安装模式。直接运行便携版 exe 不会自动创建开始菜单入口；需要被系统或第三方启动器发现时，应使用安装包。
+
 ```sh
 npm run tauri build -- --no-bundle
 ```
@@ -42,6 +50,8 @@ npm run tauri build -- --no-bundle
 产物位于 Cargo 配置的 target 目录下 `release/huanj.exe`（Windows）或 `release/huanj`（macOS）。如果没有全局 target 配置，则在项目的 `target/release` 中。
 
 生成安装包使用 `npm run tauri build`。Windows 支持 MSI/NSIS；Mac 的应用打包和签名需要在 macOS 上完成。项目没有包含发布签名证书。
+
+应用显示名称为“缓境 Huanj”，应用标识仍是 `dev.huanj.cleaner`，原有已保存扫描设置继续沿用。
 
 `.github/workflows/check.yml` 提供 Windows x64、macOS Apple Silicon、macOS Intel 的测试与构建配置。配置不等于执行成功；本地 Windows 验证结果不能替代 Mac 构建或实机验收。
 

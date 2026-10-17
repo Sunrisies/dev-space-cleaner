@@ -506,7 +506,7 @@ export default function App() {
           <button className="nav-item" onClick={() => setHelp(true)}>
             <CircleHelp size={17} />
             <span>使用说明</span>
-            <span className="version">v0.1.3</span>
+            <span className="version">v0.1.4</span>
           </button>
         </div>
       </aside>
