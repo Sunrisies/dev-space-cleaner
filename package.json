@@ -1,9 +1,10 @@
 {
   "name": "huanj",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
+    "test:ui": "playwright test",
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
@@ -19,6 +20,7 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19",
     "@types/react-dom": "^19",

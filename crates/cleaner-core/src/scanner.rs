@@ -147,7 +147,13 @@ impl Counters {
 
 struct Queue {
     pending: usize,
-    jobs: VecDeque<PathBuf>,
+    jobs: VecDeque<DirectoryJob>,
+}
+struct DirectoryJob {
+    path: PathBuf,
+    // Directory enumeration already supplies this on Windows. Reusing it avoids
+    // a second filesystem query for every discovered directory.
+    metadata: Option<fs::Metadata>,
 }
 type Sink<'a> = dyn Fn(ScanEvent) + Send + Sync + 'a;
 struct Engine<'a> {
@@ -180,12 +186,26 @@ impl Engine<'_> {
             });
         }
     }
+    fn flush_counts(&self, files: &mut u64, bytes: &mut u64, links: &mut u64) {
+        self.counters
+            .files
+            .fetch_add(std::mem::take(files), Ordering::Relaxed);
+        self.counters
+            .bytes
+            .fetch_add(std::mem::take(bytes), Ordering::Relaxed);
+        self.counters
+            .links
+            .fetch_add(std::mem::take(links), Ordering::Relaxed);
+    }
     fn measure(&self, item: &mut Candidate) {
         let mut stack = vec![item.path.clone()];
         while let Some(dir) = stack.pop() {
             if self.cancel.load(Ordering::Relaxed) {
                 item.complete = false;
                 break;
+            }
+            if dir != item.path {
+                self.counters.dirs.fetch_add(1, Ordering::Relaxed);
             }
             let entries = match fs::read_dir(&dir) {
                 Ok(e) => e,
@@ -195,7 +215,12 @@ impl Engine<'_> {
                     continue;
                 }
             };
-            for entry in entries {
+            let (mut batch_files, mut batch_bytes, mut batch_links) = (0, 0, 0);
+            for (index, entry) in entries.enumerate() {
+                if index % 256 == 0 {
+                    self.flush_counts(&mut batch_files, &mut batch_bytes, &mut batch_links);
+                    self.progress(&dir);
+                }
                 if self.cancel.load(Ordering::Relaxed) {
                     item.complete = false;
                     break;
@@ -208,51 +233,55 @@ impl Engine<'_> {
                         continue;
                     }
                 };
-                let path = entry.path();
                 // DirEntry::metadata does not follow symlinks. Windows can reuse
                 // enumeration metadata instead of opening every file for a stat.
                 let meta = match entry.metadata() {
                     Ok(m) => m,
                     Err(e) => {
                         item.errors += 1;
-                        self.issue(&path, e);
+                        self.issue(&entry.path(), e);
                         continue;
                     }
                 };
                 if is_link(&meta) {
                     item.skipped_links += 1;
-                    self.counters.links.fetch_add(1, Ordering::Relaxed);
+                    batch_links += 1;
                     continue;
                 }
                 if meta.is_dir() {
-                    stack.push(path);
+                    stack.push(entry.path());
                 } else if meta.is_file() {
                     match item.bytes.checked_add(meta.len()) {
-                        Some(v) => item.bytes = v,
+                        Some(v) => {
+                            item.bytes = v;
+                            batch_bytes += meta.len();
+                        }
                         None => {
                             item.complete = false;
                             item.errors += 1;
+                            self.issue(&dir, "逻辑字节总和超过可表示范围");
                         }
                     }
                     item.files += 1;
-                    self.counters.files.fetch_add(1, Ordering::Relaxed);
-                    self.counters.bytes.fetch_add(meta.len(), Ordering::Relaxed);
+                    batch_files += 1;
                 }
-                self.progress(&dir);
             }
-            if dir != item.path {
-                self.counters.dirs.fetch_add(1, Ordering::Relaxed);
-            }
+            self.flush_counts(&mut batch_files, &mut batch_bytes, &mut batch_links);
             self.progress(&dir);
         }
         item.complete &= item.errors == 0 && !self.cancel.load(Ordering::Relaxed);
         item.measured = true;
     }
-    fn directory(&self, path: &Path, root: &Path, children: &mut Vec<PathBuf>) {
+    fn directory(&self, job: DirectoryJob, root: &Path, children: &mut Vec<DirectoryJob>) {
+        let path = &job.path;
         if self.cancel.load(Ordering::Relaxed) {
             return;
         }
-        let meta = match fs::symlink_metadata(path) {
+        let meta = match job
+            .metadata
+            .map(Ok)
+            .unwrap_or_else(|| fs::symlink_metadata(path))
+        {
             Ok(m) => m,
             Err(e) => {
                 self.issue(path, e);
@@ -311,7 +340,10 @@ impl Engine<'_> {
                 return;
             }
         };
-        for entry in entries {
+        for (index, entry) in entries.enumerate() {
+            if index % 256 == 0 {
+                self.progress(path);
+            }
             if self.cancel.load(Ordering::Relaxed) {
                 break;
             }
@@ -322,11 +354,10 @@ impl Engine<'_> {
                     continue;
                 }
             };
-            let child = entry.path();
             let ty = match entry.file_type() {
                 Ok(t) => t,
                 Err(e) => {
-                    self.issue(&child, e);
+                    self.issue(&entry.path(), e);
                     continue;
                 }
             };
@@ -334,8 +365,21 @@ impl Engine<'_> {
                 self.counters.links.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
-            if ty.is_dir() && !excluded(&child) {
-                children.push(child);
+            if ty.is_dir() {
+                let child = entry.path();
+                if excluded(&child) {
+                    continue;
+                }
+                match entry.metadata() {
+                    Ok(meta) if is_link(&meta) => {
+                        self.counters.links.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(meta) => children.push(DirectoryJob {
+                        path: child,
+                        metadata: Some(meta),
+                    }),
+                    Err(e) => self.issue(&child, e),
+                }
             }
         }
     }
@@ -437,7 +481,10 @@ pub fn scan(
         let queue = (
             Mutex::new(Queue {
                 pending: 1,
-                jobs: VecDeque::from([root.clone()]),
+                jobs: VecDeque::from([DirectoryJob {
+                    path: root.clone(),
+                    metadata: None,
+                }]),
             }),
             Condvar::new(),
         );
@@ -464,13 +511,13 @@ pub fn scan(
                             }
                         };
                         let mut local = vec![job];
-                        while let Some(path) = local.pop() {
+                        while let Some(job) = local.pop() {
                             if engine.cancel.load(Ordering::Relaxed) {
                                 queue.1.notify_all();
                                 return;
                             }
                             let mut children = Vec::new();
-                            engine.directory(&path, root, &mut children);
+                            engine.directory(job, root, &mut children);
                             let mut q = queue.0.lock().unwrap();
                             for child in children {
                                 if q.jobs.len() < 2048 {

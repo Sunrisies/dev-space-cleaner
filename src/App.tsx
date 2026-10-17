@@ -131,7 +131,7 @@ export default function App() {
       return "system";
     }
   });
-  const [workers, setWorkers] = useState(4);
+  const [workers, setWorkers] = useState(8);
   const session = useRef("");
   const staged = useRef(new Map<number, Candidate>());
   const busy = scanning || cleaning;
@@ -436,7 +436,7 @@ export default function App() {
           <button className="nav-item" onClick={() => setHelp(true)}>
             <CircleHelp size={17} />
             <span>使用说明</span>
-            <span className="version">v0.1</span>
+            <span className="version">v0.1.1</span>
           </button>
         </div>
       </aside>
@@ -604,13 +604,21 @@ export default function App() {
               <div className="metric-value">
                 {size(progress.bytes)}
                 <small>
-                  {scanning ? "统计中" : summary ? "已统计" : "等待扫描"}
+                  {scanning
+                    ? "统计中"
+                    : summary
+                      ? summary.cancelled || progress.errors > 0
+                        ? "部分统计"
+                        : "已统计"
+                      : "等待扫描"}
                 </small>
               </div>
               <div className="metric-foot">
                 {summary?.cancelled
                   ? "扫描已取消，以下为部分结果"
-                  : "实际释放空间取决于磁盘与回收站"}
+                  : progress.errors > 0
+                    ? "有目录无法读取，合计可能不完整"
+                    : "实际释放空间取决于磁盘与回收站"}
               </div>
             </div>
             <div className="metric">
@@ -1059,7 +1067,7 @@ export default function App() {
                   {[1, 2, 4, 8, 16].map((n) => (
                     <option key={n} value={n}>
                       {n}
-                      {n === 4 ? "（默认）" : ""}
+                      {n === 8 ? "（默认）" : ""}
                     </option>
                   ))}
                 </select>

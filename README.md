@@ -10,6 +10,9 @@
 - 先展示候选，再补充大小；实时进度、取消、筛选、搜索与虚拟列表。
 - 完整统计后手动勾选，确认后移入回收站；逐项反馈错误。
 - 中文界面、系统/浅色/深色主题、自定义扫描范围和线程数。
+- 固定页面布局，只有结果列表和弹窗长内容滚动；默认 8 工作线程，可在设置中调整。
+
+0.1.1 的实际 D 盘对照、独立大小抽查与布局回归见 [验证记录](docs/2026-10-17-performance-layout.md)。
 
 ## 开发
 
@@ -43,10 +46,13 @@ cargo test -p huanj-core
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 npm run build
+npm run test:ui
 cargo run -p huanj-core --release --example benchmark
 ```
 
 基准会在临时目录创建 120 个项目和 24,040 个目标文件，创建过程不计入扫描耗时。每次验证目标数、文件数、总字节数与预期一致，再报告耗时。临时目录只包含基准自己生成的数据。
+
+布局回归在本地使用系统安装的 Google Chrome，在 CI 使用独立 Chromium。测试三个窗口尺寸、固定底栏、列表独立滚动和设置弹窗；不访问或删除真实磁盘文件。运行 `node scripts/audit-sizes.mjs <目录>` 可以用独立 Node.js 遍历核对逻辑大小。
 
 Windows 可显式执行回收站集成检查：`cargo test -p huanj-core recycles_only_generated_fixture -- --ignored --nocapture`。该测试只将新生成的一份测试文件移入真实回收站，默认测试不会执行它。
 

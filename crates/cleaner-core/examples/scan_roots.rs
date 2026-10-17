@@ -5,7 +5,26 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 fn main() {
-    let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let mut args = Vec::new();
+    let mut workers = 8;
+    let mut input = std::env::args_os().skip(1);
+    while let Some(arg) = input.next() {
+        if arg == "--workers" {
+            workers = input
+                .next()
+                .expect("--workers needs a value")
+                .to_str()
+                .expect("worker count must be UTF-8")
+                .parse()
+                .expect("worker count must be an integer");
+            assert!(
+                (1..=16).contains(&workers),
+                "worker count must be between 1 and 16"
+            );
+        } else {
+            args.push(PathBuf::from(arg));
+        }
+    }
     let roots = if args.is_empty() {
         drives().into_iter().map(|d| d.path).collect()
     } else {
@@ -15,7 +34,7 @@ fn main() {
         ScanOptions {
             roots,
             kinds: vec![Kind::Node, Kind::Rust, Kind::Python],
-            workers: 4,
+            workers,
         },
         Arc::new(AtomicBool::new(false)),
         |event| {

@@ -109,7 +109,13 @@ pub(crate) fn excluded(path: &Path) -> bool {
     if path.parent().is_some_and(|p| p.parent().is_none())
         && matches!(
             name.as_str(),
-            "windows" | "program files" | "program files (x86)" | "programdata" | "recovery"
+            "windows"
+                | "program files"
+                | "program files (x86)"
+                | "programdata"
+                | "recovery"
+                | "windowsapps"
+                | "config.msi"
         )
     {
         return true;
@@ -138,4 +144,15 @@ pub(crate) fn excluded(path: &Path) -> bool {
         }
     }
     false
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    #[test]
+    fn skips_system_managed_volume_directories_but_not_project_names() {
+        assert!(excluded(Path::new(r"D:\WindowsApps")));
+        assert!(excluded(Path::new(r"\\?\D:\Config.Msi")));
+        assert!(!excluded(Path::new(r"D:\project\WindowsApps")));
+    }
 }

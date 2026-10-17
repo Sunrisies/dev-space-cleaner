@@ -32,6 +32,13 @@
 * {
   box-sizing: border-box;
 }
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
 body {
   margin: 0;
 }
@@ -104,8 +111,9 @@ p {
 }
 .app-shell {
   display: flex;
-  height: 100dvh;
-  min-height: 640px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
 }
@@ -326,7 +334,7 @@ p {
   padding: 28px 34px 14px;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 21px;
@@ -677,7 +685,7 @@ h1 > span {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
-  min-height: 310px;
+  min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -819,8 +827,9 @@ h1 > span {
 }
 .result-scroll {
   flex: 1;
-  min-height: 185px;
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   contain: strict;
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
@@ -943,7 +952,7 @@ h1 > span {
 }
 .empty-state {
   height: 100%;
-  min-height: 185px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1125,11 +1134,17 @@ h1 > span {
 .modal.wide {
   width: 590px;
 }
+.modal[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .modal::backdrop {
   background: #0b181e65;
   backdrop-filter: blur(3px);
 }
 .modal > header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1141,6 +1156,8 @@ h1 > span {
   font-weight: 600;
 }
 .modal-body {
+  min-height: 0;
+  overflow-y: auto;
   padding: 23px;
   line-height: 1.9;
   font-size: 12px;
@@ -1151,6 +1168,7 @@ h1 > span {
   margin-bottom: 20px;
 }
 .modal-footer {
+  flex-shrink: 0;
   padding: 16px 23px;
   border-top: 1px solid var(--line);
   display: flex;
@@ -1407,7 +1425,7 @@ h1 > span {
     padding: 24px;
   }
   .results-panel {
-    min-height: 350px;
+    min-height: 0;
   }
   .empty-state {
     padding: 40px;
@@ -1475,6 +1493,141 @@ h1 > span {
   }
   .scope-change {
     margin-right: 2px;
+  }
+}
+/* Height, rather than width, determines how much room the result list gets.
+   Compact the fixed controls before shrinking the independently scrolling list. */
+@media (max-height: 900px) {
+  .workspace {
+    padding: 18px 28px 10px;
+    gap: 14px;
+  }
+  .topbar {
+    height: 52px;
+  }
+  .selection-bar {
+    height: 60px;
+  }
+  .page-heading {
+    margin: 0;
+  }
+  .page-heading h1 {
+    font-size: 24px;
+  }
+  .eyebrow {
+    margin-bottom: 5px;
+  }
+  .page-heading p {
+    margin-top: 5px;
+  }
+  .scan-controls {
+    padding: 14px 20px;
+  }
+  .scan-bottom {
+    padding: 9px 20px;
+  }
+  .metric {
+    padding: 13px 18px;
+  }
+  .metric-label {
+    margin-bottom: 10px;
+  }
+  .metric-foot {
+    margin-top: 10px;
+  }
+  .language-summary {
+    margin-top: 12px;
+  }
+  .metric-value {
+    font-size: 24px;
+  }
+  .results-heading {
+    padding: 11px 20px;
+  }
+  .empty-state {
+    padding: 12px;
+  }
+  .empty-art {
+    height: 52px;
+    width: 68px;
+    margin-bottom: 12px;
+  }
+  .empty-art > div {
+    height: 48px;
+    width: 48px;
+    border-radius: 13px;
+  }
+  .empty-tags {
+    margin-top: 12px;
+  }
+}
+@media (max-height: 740px) {
+  .workspace {
+    padding: 12px 22px 8px;
+    gap: 10px;
+  }
+  .page-heading .eyebrow,
+  .page-heading p,
+  .heading-art,
+  .page-footnote {
+    display: none;
+  }
+  .page-heading h1 {
+    font-size: 22px;
+  }
+  .scan-controls {
+    padding: 10px 16px;
+  }
+  .scope-icon {
+    width: 38px;
+    height: 38px;
+  }
+  .scan-bottom {
+    padding: 7px 16px;
+  }
+  .metric {
+    padding: 10px 14px;
+  }
+  .metric-label {
+    margin-bottom: 8px;
+  }
+  .metric-value {
+    font-size: 22px;
+  }
+  .metric-foot,
+  .language-summary {
+    margin-top: 8px;
+  }
+  .status-value {
+    font-size: 17px;
+  }
+  .empty-art,
+  .empty-tags {
+    display: none;
+  }
+  .brand {
+    padding-bottom: 25px;
+  }
+  .languages-label {
+    margin-top: 22px;
+  }
+}
+@media (max-height: 660px) {
+  .metric-foot,
+  .language-summary {
+    display: none;
+  }
+  .metric {
+    padding: 8px 14px;
+  }
+  .metric-label {
+    margin-bottom: 6px;
+  }
+  .selection-bar {
+    height: 54px;
+  }
+  .topbar {
+    height: 46px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

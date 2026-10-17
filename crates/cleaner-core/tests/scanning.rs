@@ -166,6 +166,29 @@ fn queue_pressure_completes_without_losing_targets() {
     assert_eq!(summary.progress.errors, 0);
 }
 
+#[test]
+fn batches_preserve_every_byte_and_trailing_file() {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("中文项目/node_modules");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.parent().unwrap().join("package.json"), "{}").unwrap();
+    let mut expected = 0;
+    for n in 0..769 {
+        let length = n % 37;
+        fs::write(target.join(format!("文件-{n}.js")), vec![0; length]).unwrap();
+        expected += length as u64;
+    }
+    for workers in [1, 4] {
+        let (items, summary) = collect(vec![root.path().into()], vec![Kind::Node], workers);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].files, 769);
+        assert_eq!(items[0].bytes, expected);
+        assert_eq!(summary.progress.files, 769);
+        assert_eq!(summary.progress.bytes, expected);
+        assert!(items[0].complete);
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn links_are_not_followed_or_counted() {

@@ -2,6 +2,8 @@
 
 日期：2026-10-17。执行环境：Windows x64，Rust 1.97.1、Node.js 26.2.0。
 
+本文记录 0.1.0 初版。0.1.1 的优化与新增复核见 [D 盘性能和布局验证](2026-10-17-performance-layout.md)。
+
 ## 核心准确性与边界
 
 `cargo test -p huanj-core`：9 项默认测试通过。覆盖：
