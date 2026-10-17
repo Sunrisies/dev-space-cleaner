@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/cleaner-core", "src-tauri"]
+default-members = ["crates/cleaner-core"]
+resolver = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

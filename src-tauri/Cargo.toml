@@ -1,0 +1,17 @@
+[package]
+name = "huanj"
+version = "0.1.0"
+edition = "2024"
+default-run = "huanj"
+
+[lib]
+name = "huanj_desktop"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+huanj-core = { path = "../crates/cleaner-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
