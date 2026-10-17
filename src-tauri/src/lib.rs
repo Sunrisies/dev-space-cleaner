@@ -1,3 +1,4 @@
+mod directory;
 mod preferences;
 use huanj_core::{
     Candidate, CleanResult, Drive, Kind, ScanEvent, ScanOptions, clean, drives, scan,
@@ -13,6 +14,7 @@ use std::{
     },
 };
 use tauri::{State, ipc::Channel};
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Clone, Serialize)]
 struct Envelope {
@@ -86,8 +88,9 @@ fn start_scan(
                 },
                 cancel.clone(),
                 |event| {
-                    // Commit complete candidates before sending the event to the UI.
-                    if let ScanEvent::Sized(ref item) = event {
+                    // Register paths before displaying them. Sizing replaces the
+                    // snapshot; cleaning still requires a complete measurement.
+                    if let ScanEvent::Found(ref item) | ScanEvent::Sized(ref item) = event {
                         let mut current = shared.lock().unwrap();
                         if current.id == session {
                             current.candidates.insert(item.id, item.clone());
@@ -202,10 +205,42 @@ async fn clean_selected(
     Ok(results)
 }
 
+#[tauri::command]
+async fn open_candidate_directory(
+    app: tauri::AppHandle,
+    session: String,
+    id: u64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let item = {
+        let current = state.0.lock().map_err(|e| e.to_string())?;
+        if current.id != session {
+            return Err("扫描会话已过期，请重新扫描".into());
+        }
+        current
+            .candidates
+            .get(&id)
+            .cloned()
+            .ok_or("目录已清理或不属于本次扫描")?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = directory::resolve(&item)?;
+        let path = dunce::simplified(&path)
+            .to_str()
+            .ok_or("目录路径编码无法被文件管理器识别")?;
+        app.opener()
+            .open_path(path, None::<&str>)
+            .map_err(|e| format!("无法打开目录：{e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .manage(PreferencesLock::default())
         .invoke_handler(tauri::generate_handler![
@@ -213,6 +248,7 @@ pub fn run() {
             start_scan,
             cancel_scan,
             clean_selected,
+            open_candidate_directory,
             preferences::load_preferences,
             preferences::save_preferences
         ])

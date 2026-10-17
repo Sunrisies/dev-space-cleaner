@@ -9,6 +9,7 @@ import {
 import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { summarize } from "./summary";
 import {
   loadPreferences,
   savePreferences,
@@ -126,6 +127,7 @@ export default function App() {
   const [help, setHelp] = useState(false);
   const [detailSnapshot, setDetail] = useState<Candidate | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [cleanReport, setCleanReport] = useState(false);
   const [cleanResults, setCleanResults] = useState<Map<number, CleanResult>>(
     new Map(),
   );
@@ -137,6 +139,12 @@ export default function App() {
     }
   });
   const [workers, setWorkers] = useState(8);
+  const [contextMenu, setContextMenu] = useState<{
+    id: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [preferencesError, setPreferencesError] = useState("");
@@ -246,6 +254,17 @@ export default function App() {
   }, [scanning, flush]);
 
   const allItems = useMemo(() => Array.from(items.values()), [items]);
+  const failedItems = allItems.filter(
+    (item) => cleanResults.get(item.id)?.success === false,
+  );
+  const removed = useMemo(
+    () =>
+      new Set(
+        [...cleanResults.values()].filter((r) => r.success).map((r) => r.id),
+      ),
+    [cleanResults],
+  );
+  const contextItem = contextMenu ? items.get(contextMenu.id) : null;
   const detail =
     detailSnapshot && (items.get(detailSnapshot.id) ?? detailSnapshot);
   const visible = useMemo(() => {
@@ -279,20 +298,80 @@ export default function App() {
     getItemKey: (i) => visible[i].id,
   });
   const totals = useMemo(
-    () =>
-      Object.fromEntries(
-        kinds.map((k) => [
-          k,
-          allItems
-            .filter((i) => i.kind === k)
-            .reduce(
-              (a, i) => ({ count: a.count + 1, bytes: a.bytes + i.bytes }),
-              { count: 0, bytes: 0 },
-            ),
-        ]),
-      ) as Record<Kind, { count: number; bytes: number }>,
-    [allItems],
+    () => summarize(allItems, removed),
+    [allItems, removed],
   );
+  const remainingBytes = kinds.reduce((sum, k) => sum + totals[k].bytes, 0);
+  const remainingCount = kinds.reduce((sum, k) => sum + totals[k].count, 0);
+  const totalText = (kind: Kind) => {
+    const total = totals[kind];
+    if (!summary && !scanning && !allItems.length) return "等待扫描";
+    const label =
+      scanning || total.pending
+        ? " · 统计中"
+        : failedItems.some((item) => item.kind === kind)
+          ? " · 待复核"
+          : total.incomplete || summary?.cancelled || progress.errors
+            ? " · 部分统计"
+            : "";
+    return size(total.bytes) + label;
+  };
+
+  function showContextMenu(id: number, x: number, y: number) {
+    setContextMenu({
+      id,
+      x: Math.max(8, Math.min(x, innerWidth - 240)),
+      y: Math.max(8, Math.min(y, innerHeight - 120)),
+    });
+  }
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const initialScroll = scrollRef.current?.scrollTop;
+    const scroll = () => {
+      if (scrollRef.current?.scrollTop !== initialScroll) close();
+    };
+    const pointer = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) close();
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+        document
+          .querySelector<HTMLElement>(`[data-candidate-id="${contextMenu.id}"]`)
+          ?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", pointer);
+    document.addEventListener("keydown", key);
+    window.addEventListener("scroll", scroll, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("blur", close);
+    return () => {
+      document.removeEventListener("pointerdown", pointer);
+      document.removeEventListener("keydown", key);
+      window.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [contextMenu]);
+
+  async function openDirectory(item: Candidate) {
+    setContextMenu(null);
+    if (!native) {
+      setMessage("请在桌面应用中打开本机目录。");
+      return;
+    }
+    try {
+      await invoke("open_candidate_directory", {
+        session: session.current,
+        id: item.id,
+      });
+    } catch (error) {
+      setMessage(String(error));
+    }
+  }
   const rootList = mode === "all" ? drives.map((d) => d.path) : customRoots;
   const finishedRoots = Object.values(rootStatuses).filter(
     (s) => s.phase === "done" || s.phase === "skipped",
@@ -315,6 +394,7 @@ export default function App() {
     });
 
   async function start() {
+    setContextMenu(null);
     if (!native) {
       setMessage("请通过桌面应用运行以访问本机磁盘。浏览器仅用于查看界面。");
       return;
@@ -329,6 +409,7 @@ export default function App() {
     setItems(new Map());
     setSelected(new Set());
     setCleanResults(new Map());
+    setCleanReport(false);
     setProgress(emptyProgress);
     setSummary(null);
     setIssues([]);
@@ -424,6 +505,7 @@ export default function App() {
       const success = new Set(
         results.filter((r) => r.success).map((r) => r.id),
       );
+      if (results.some((result) => !result.success)) setCleanReport(true);
       setSelected((old) => new Set([...old].filter((id) => !success.has(id))));
       setMessage(
         `已移入回收站 ${success.size} 项${results.length > success.size ? `，${results.length - success.size} 项失败，请查看对应目录详情` : "。清空回收站后才会释放空间。"}`,
@@ -478,16 +560,20 @@ export default function App() {
           <ChevronRight size={15} />
         </button>
         <div className="nav-label languages-label">
-          开发环境<span>已发现</span>
+          开发环境<span>逻辑体积汇总</span>
         </div>
         {kinds.map((k) => (
           <button
             key={k}
             className={`nav-item language-nav ${filter === k ? "active" : ""}`}
+            aria-label={`${kindInfo[k].label}：${totals[k].count} 个剩余目录，${totalText(k)}`}
             onClick={() => setFilter(filter === k ? "all" : k)}
           >
             <span className={`lang-icon ${k}`}>{kindInfo[k].letter}</span>
-            <span>{kindInfo[k].label}</span>
+            <span className="language-copy">
+              <span>{kindInfo[k].label}</span>
+              <small>{totalText(k)}</small>
+            </span>
             <span className="nav-count">{totals[k].count}</span>
           </button>
         ))}
@@ -506,7 +592,7 @@ export default function App() {
           <button className="nav-item" onClick={() => setHelp(true)}>
             <CircleHelp size={17} />
             <span>使用说明</span>
-            <span className="version">v0.1.4</span>
+            <span className="version">v0.1.5</span>
           </button>
         </div>
       </aside>
@@ -552,6 +638,14 @@ export default function App() {
             <div className="notice" role="status">
               <CircleHelp size={16} />
               <span>{message}</span>
+              {failedItems.length > 0 && (
+                <button
+                  className="text-button"
+                  onClick={() => setCleanReport(true)}
+                >
+                  查看失败目录（{failedItems.length}）
+                </button>
+              )}
               <button
                 className="icon-button"
                 aria-label="关闭提示"
@@ -655,36 +749,40 @@ export default function App() {
           <div className="metrics">
             <div className="metric main-metric">
               <div className="metric-label">
-                <span>发现的逻辑体积</span>
+                <span>目录逻辑体积</span>
                 <Layers3 size={16} />
               </div>
               <div className="metric-value">
-                {size(progress.bytes)}
+                {size(scanning ? progress.bytes : remainingBytes)}
                 <small>
                   {scanning
                     ? "统计中"
                     : summary
-                      ? summary.cancelled || progress.errors > 0
-                        ? "部分统计"
-                        : "已统计"
+                      ? failedItems.length
+                        ? "待复核"
+                        : summary.cancelled || progress.errors > 0
+                          ? "部分统计"
+                          : "已统计"
                       : "等待扫描"}
                 </small>
               </div>
               <div className="metric-foot">
                 {summary?.cancelled
                   ? "扫描已取消，以下为部分结果"
-                  : progress.errors > 0
-                    ? "有目录无法读取，合计可能不完整"
-                    : "实际释放空间取决于磁盘与回收站"}
+                  : failedItems.length
+                    ? "清理未确认完成，请重新扫描核对大小"
+                    : progress.errors > 0
+                      ? "有目录无法读取，合计可能不完整"
+                      : "实际释放空间取决于磁盘与回收站"}
               </div>
             </div>
             <div className="metric">
               <div className="metric-label">
-                <span>依赖与构建目录</span>
+                <span>剩余目录</span>
                 <Folder size={16} />
               </div>
               <div className="metric-value">
-                {allItems.length.toLocaleString()}
+                {remainingCount.toLocaleString()}
                 <small>个目录</small>
               </div>
               <div className="language-summary">
@@ -823,6 +921,22 @@ export default function App() {
                     return (
                       <div
                         key={item.id}
+                        data-candidate-id={item.id}
+                        tabIndex={0}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          showContextMenu(item.id, e.clientX, e.clientY);
+                        }}
+                        onKeyDown={(e) => {
+                          if (
+                            e.key === "ContextMenu" ||
+                            (e.shiftKey && e.key === "F10")
+                          ) {
+                            e.preventDefault();
+                            const r = e.currentTarget.getBoundingClientRect();
+                            showContextMenu(item.id, r.left + 48, r.top + 20);
+                          }
+                        }}
                         className={`result-row result-grid ${selected.has(item.id) ? "checked" : ""} ${result?.success ? "cleaned" : ""}`}
                         style={{
                           position: "absolute",
@@ -1031,6 +1145,100 @@ export default function App() {
         </footer>
       </main>
 
+      {contextMenu && contextItem && (
+        <div
+          ref={menuRef}
+          className="result-context-menu"
+          role="menu"
+          aria-label="目录操作"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onContextMenu={(e) => e.preventDefault()}
+          onKeyDown={(e) => {
+            if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+              e.preventDefault();
+              const buttons = Array.from(
+                e.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  "button:not(:disabled)",
+                ),
+              );
+              const at = buttons.indexOf(
+                document.activeElement as HTMLButtonElement,
+              );
+              const next =
+                e.key === "Home"
+                  ? 0
+                  : e.key === "End"
+                    ? buttons.length - 1
+                    : (at + (e.key === "ArrowUp" ? -1 : 1) + buttons.length) %
+                      buttons.length;
+              buttons[next]?.focus();
+            }
+          }}
+        >
+          <div className="context-caption">
+            {contextItem.project} / {kindInfo[contextItem.kind].dir}
+          </div>
+          <button
+            autoFocus={!cleaning && !removed.has(contextItem.id)}
+            role="menuitem"
+            disabled={cleaning || removed.has(contextItem.id)}
+            onClick={() => openDirectory(contextItem)}
+          >
+            <FolderOpen size={15} />
+            打开目录
+          </button>
+          <button
+            role="menuitem"
+            autoFocus={cleaning || removed.has(contextItem.id)}
+            onClick={() => {
+              setDetail(contextItem);
+              setContextMenu(null);
+            }}
+          >
+            <ArrowUpRight size={15} />
+            查看详情
+          </button>
+        </div>
+      )}
+
+      {cleanReport && (
+        <Modal title="清理失败目录" onClose={() => setCleanReport(false)} wide>
+          <div className="modal-body">
+            <p className="modal-description">
+              以下目录未确认完成回收。请检查具体原因后重新扫描或重试清理。
+            </p>
+            <div className="issue-list">
+              {failedItems.map((item) => (
+                <div key={item.id}>
+                  <code>{displayPath(item.path)}</code>
+                  <p className="error-text">
+                    {cleanResults.get(item.id)?.message}
+                  </p>
+                  <button
+                    className="button secondary"
+                    onClick={() => {
+                      setCleanReport(false);
+                      void openDirectory(item);
+                    }}
+                  >
+                    <FolderOpen size={14} />
+                    打开目录
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button
+              className="button secondary"
+              onClick={() => setCleanReport(false)}
+            >
+              关闭
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {settings && (
         <Modal title="扫描设置" onClose={() => setSettings(false)} wide>
           <div className="modal-body">
@@ -1218,9 +1426,12 @@ export default function App() {
                 {cleanResults.get(detail.id)?.message}
               </p>
             )}
-            <p className="small muted">
-              大小为普通文件的逻辑字节总和，跳过链接；硬链接、文件压缩和扫描时文件变化会影响实际磁盘占用。修改日期是目录修改时间，并非最后使用时间。
-            </p>
+            <div className="detail-note">
+              <strong>统计说明</strong>
+              <p className="small muted">
+                大小为普通文件的逻辑字节总和，跳过链接；硬链接、文件压缩和扫描时文件变化会影响实际磁盘占用。修改日期是目录修改时间，并非最后使用时间。
+              </p>
+            </div>
           </div>
         </Modal>
       )}
