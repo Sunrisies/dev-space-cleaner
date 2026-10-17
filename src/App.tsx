@@ -204,7 +204,7 @@ export default function App() {
   const virtualizer = useVirtualizer({
     count: visible.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 80,
+    estimateSize: () => 64,
     overscan: 7,
     getItemKey: (i) => visible[i].id,
   });
@@ -436,7 +436,7 @@ export default function App() {
           <button className="nav-item" onClick={() => setHelp(true)}>
             <CircleHelp size={17} />
             <span>使用说明</span>
-            <span className="version">v0.1.1</span>
+            <span className="version">v0.1.2</span>
           </button>
         </div>
       </aside>
@@ -446,7 +446,7 @@ export default function App() {
           <div className="breadcrumb">
             工作空间
             <ChevronRight size={13} />
-            <span>空间扫描</span>
+            <h1 className="page-title">空间扫描</h1>
           </div>
           <div className="top-actions">
             <span className="local-badge">
@@ -478,21 +478,6 @@ export default function App() {
           </div>
         </header>
         <section className="workspace">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">A LITTLE ROOM TO BUILD.</div>
-              <h1>
-                让灵感，有更多空间<span>。</span>
-              </h1>
-              <p>找出散落在项目里的依赖与构建产物，轻松整理开发空间。</p>
-            </div>
-            <span className="heading-art" aria-hidden="true">
-              <Layers3 size={62} strokeWidth={0.8} />
-              <i />
-              <i />
-            </span>
-          </div>
-
           {message && (
             <div className="notice" role="status">
               <CircleHelp size={16} />
@@ -691,6 +676,22 @@ export default function App() {
               <h2>
                 扫描结果<span>{visible.length}</span>
               </h2>
+              <div className="result-tabs">
+                <div className="tabs">
+                  {(["all", ...kinds] as const).map((k) => (
+                    <button
+                      className={filter === k ? "selected" : ""}
+                      key={k}
+                      onClick={() => setFilter(k)}
+                    >
+                      {k === "all" ? "全部目录" : kindInfo[k].label}
+                      <span>
+                        {k === "all" ? allItems.length : totals[k].count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="results-tools">
                 <label className="search">
                   <Search size={15} />
@@ -719,23 +720,6 @@ export default function App() {
                   {sort === "size" ? "大小" : "名称"}
                 </button>
               </div>
-            </div>
-            <div className="result-tabs">
-              <div className="tabs">
-                {(["all", ...kinds] as const).map((k) => (
-                  <button
-                    className={filter === k ? "selected" : ""}
-                    key={k}
-                    onClick={() => setFilter(k)}
-                  >
-                    {k === "all" ? "全部目录" : kindInfo[k].label}
-                    <span>
-                      {k === "all" ? allItems.length : totals[k].count}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <span className="results-legend">仅显示已识别的开发目录</span>
             </div>
             <div className="table-header result-grid">
               <label className="check-wrap">

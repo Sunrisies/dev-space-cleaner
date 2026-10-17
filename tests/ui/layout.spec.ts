@@ -3,7 +3,9 @@ import { test, expect } from "@playwright/test";
 for (const viewport of [
   { width: 1600, height: 980 },
   { width: 1280, height: 810 },
+  { width: 1080, height: 650 },
   { width: 960, height: 610 },
+  { width: 960, height: 570 },
 ]) {
   test(`fixed page and scrollable results at ${viewport.width}x${viewport.height}`, async ({
     page,
@@ -11,7 +13,7 @@ for (const viewport of [
     await page.setViewportSize(viewport);
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "让灵感，有更多空间。" }),
+      page.getByRole("heading", { name: "空间扫描", exact: true }),
     ).toBeVisible();
     const layout = await page.evaluate(() => {
       const workspace = document.querySelector(".workspace")!;
@@ -35,7 +37,9 @@ for (const viewport of [
     expect(layout.workspaceOverflow).toBe("hidden");
     expect(layout.documentOverflow).toBe(false);
     expect(layout.footerBottom).toBeLessThanOrEqual(viewport.height);
-    expect(layout.listHeight).toBeGreaterThan(90);
+    expect(layout.listHeight).toBeGreaterThan(
+      viewport.width === 1080 ? 250 : viewport.height < 600 ? 180 : 210,
+    );
     expect(layout.listBottom).toBeLessThanOrEqual(layout.footerTop);
     expect(layout.listOverflow).toBe("auto");
     // Exercise actual modal and keyboard behavior; no native file access is mocked.
@@ -43,8 +47,8 @@ for (const viewport of [
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).not.toBeVisible();
-    if (viewport.width === 1280)
-      await page.screenshot({ path: "docs/screenshots/desktop-fixed.png" });
+    if (viewport.width === 1080)
+      await page.screenshot({ path: "docs/screenshots/desktop-compact.png" });
     // Force overflowing list content without changing application or backend state.
     await page.locator(".result-scroll").evaluate((el) => {
       const content = document.createElement("div");

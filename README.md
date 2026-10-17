@@ -14,6 +14,8 @@
 
 0.1.1 的实际 D 盘对照、独立大小抽查与布局回归见 [验证记录](docs/2026-10-17-performance-layout.md)。
 
+0.1.2 默认以居中的 1080×680 普通窗口启动，不全屏、不最大化。顶部采用紧凑布局，结果行高为 64px，扫描结果占据剩余空间；窗口仍可自由调整大小。
+
 ## 开发
 
 需要 Rust stable、Node.js 22+。Windows 还需要 MSVC C++ Build Tools 和 WebView2；macOS 需要 Xcode Command Line Tools。
