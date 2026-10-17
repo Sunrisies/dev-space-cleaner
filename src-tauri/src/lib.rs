@@ -48,13 +48,8 @@ fn start_scan(
 ) -> Result<(), String> {
     let kinds: Vec<Kind> = kinds
         .iter()
-        .filter_map(|k| match k.as_str() {
-            "node" => Some(Kind::Node),
-            "rust" => Some(Kind::Rust),
-            "python" => Some(Kind::Python),
-            _ => None,
-        })
-        .collect();
+        .map(|k| Kind::from_id(k).ok_or_else(|| format!("未知扫描类型：{k}")))
+        .collect::<Result<_, _>>()?;
     if kinds.is_empty() {
         return Err("至少选择一种目录类型".into());
     }

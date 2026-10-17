@@ -1,4 +1,4 @@
-use crate::{Candidate, is_link, scanner::identify};
+use crate::{Candidate, is_link, rules::identify};
 use serde::Serialize;
 use std::fs;
 
@@ -16,9 +16,6 @@ pub fn validate(item: &Candidate) -> Result<(), String> {
     if item.path == item.root || !item.path.starts_with(&item.root) {
         return Err("拒绝清理扫描根或范围外目录".into());
     }
-    if item.path.file_name().and_then(|s| s.to_str()) != Some(item.kind.directory()) {
-        return Err("目录名称已变化".into());
-    }
     for path in item.path.ancestors() {
         let meta = fs::symlink_metadata(path).map_err(|e| format!("重新校验失败：{e}"))?;
         if is_link(&meta) || !meta.is_dir() {
@@ -35,7 +32,7 @@ pub fn validate(item: &Candidate) -> Result<(), String> {
     if actual != item.path {
         return Err("目录实际路径已变化".into());
     }
-    if identify(&item.path).map(|(kind, _)| kind) != Some(item.kind) {
+    if !identify(&item.path).is_some_and(|r| r.kind == item.kind && r.rule == item.rule) {
         return Err("项目识别依据已变化，请重新扫描".into());
     }
     Ok(())

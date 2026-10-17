@@ -5,12 +5,12 @@
 ## 功能
 
 - Windows 的本地盘、可移动盘、已映射网络盘；macOS 数据卷和其他已挂载卷。
-- 识别 `node_modules`、`target`、`.venv`，结合项目标识避免仅凭名称判断。
+- 支持 16 类开发生态的项目依赖、构建产物及工具缓存，结合项目与产物标识识别目录。
 - 受控工作线程、目录去重、不跟随符号链接或 Windows reparse point。
 - 先展示候选，再补充大小；实时进度、取消、筛选、搜索与虚拟列表。
 - 完整统计后手动勾选，确认后移入回收站；逐项反馈错误。
 - 中文界面、系统/浅色/深色主题、自定义扫描范围和线程数。
-- 固定页面布局，只有结果列表和弹窗长内容滚动；默认 8 工作线程，可在设置中调整。
+- 固定页面布局，分类汇总、结果列表和弹窗长内容独立滚动；默认 8 工作线程，可在设置中调整。
 
 0.1.1 的实际 D 盘对照、独立大小抽查与布局回归见 [验证记录](docs/2026-10-17-performance-layout.md)。
 
@@ -19,6 +19,35 @@
 0.1.3 支持保存扫描设置：在“调整范围 / 扫描设置”里选择自定义目录与线程数后点击“保存设置”，当前扫描类型一并保存。下次启动恢复这些设置，不自动开始扫描。切换全盘并保存也会保留自定义目录列表，之后可再切回。
 
 桌面设置存放在系统应用配置目录中的 `scan-settings.json`，与 WebView 缓存分开，并沿用应用标识跨版本保存。离线或暂未挂载的位置不会被自动删除；扫描时仍检查路径可访问性。保存失败、内容损坏会明确提示，不在启动时自动覆盖原文件。
+
+## 0.2.0 项目工具链扩展
+
+类型选择位于“扫描设置”，支持搜索、批量选择当前搜索结果及保存。左侧分类列表可独立滚动，按每类显示数量和逻辑大小。结果筛选采用下拉列表，每行显示实际目录名，右击仍可打开目录。
+
+| 类型 | 已实现识别范围（必须满足对应项目/产物标识） |
+|---|---|
+| JS/TS（Node.js） | node_modules、已生成的 Next .next、Nuxt .nuxt |
+| Rust | Cargo target |
+| Python | .venv/venv/env 虚拟环境、__pycache__、pytest/mypy/Ruff 缓存 |
+| Android | Gradle build、项目 .gradle、.cxx |
+| Java/Kotlin | Maven target、Gradle build/.gradle |
+| .NET（C#/F#/VB） | bin、obj；限定常规项目位置与生成标识 |
+| C/C++ | CMakeFiles、Meson meson-logs；保留外层配置，不清理任意 build |
+| Swift/Objective-C | SwiftPM .build |
+| Dart/Flutter | .dart_tool、Flutter build |
+| PHP | Composer vendor |
+| Ruby | Bundler vendor/bundle |
+| Scala | sbt target |
+| Elixir/Erlang | Mix/Rebar3 _build |
+| Haskell | Stack .stack-work、Cabal dist-newstyle |
+| OCaml | Dune _build |
+| Zig | .zig-cache、zig-cache |
+
+全局缓存没有混入项目清理。本轮暂不实现 Go 构建缓存、Xcode DerivedData、npm/pip/Gradle 等全局缓存的选择与清理；后续作为独立可选范围。SDK/NDK/JDK、模拟器、签名、下载仓库和配置不纳入。
+
+保留旧版已保存的三类选择；不会自动勾选新增语言。首次安装默认启用上述项目类型，清理结果仍默认不勾选。规则采用常规路径与明确标识，不执行构建脚本，无法确认或非标准布局的目录可能不显示。
+
+实际 D 盘对照及独立大小抽查见 [0.2.0 验证记录](docs/2026-10-17-toolchain-expansion.md)。
 
 ## 开发
 
@@ -85,7 +114,7 @@ Windows 可显式执行回收站集成检查：`cargo test -p huanj-core recycle
 
 权限不足、文件读取失败或取消中的统计显示为不完整，不能清理。扫描正在变化的目录不具备文件系统快照语义，结果反映扫描期间观察到的文件元数据；清理前会重新验证目录与项目标识。
 
-“修改日期”是目录修改时间，不是最后访问或最后使用时间。支持 workspace 的常规 `target`，不自动解析任意 Cargo `target-dir`。Python 仅识别含 `pyvenv.cfg` 的 `.venv`。
+“修改日期”是目录修改时间，不是最后访问或最后使用时间。支持 workspace 的常规 `target`，不自动解析任意 Cargo `target-dir`。Python 虚拟环境限含 `pyvenv.cfg` 的 `.venv`、`venv`、`env`；其他缓存要求字节码或工具缓存标识。
 
 默认跳过系统目录、回收站、`.git`、链接及 macOS 应用包等范围。扫描所有磁盘不代表能够绕过系统权限、挂载状态或系统目录排除规则。
 

@@ -71,4 +71,4 @@ UI 验证小窗口类型选择、分类汇总、结果筛选和目录菜单，�
 - Dune：https://dune.readthedocs.io/en/stable/reference/cli.html
 - Zig 构建系统：https://ziglang.org/learn/build-system/
 
-扫描范围已于 2026-10-17 经用户确认。本文待最终审阅；尚未修改应用代码或发布版本。
+用户于 2026-10-17 确认范围并批准按本方案实施。0.2.0 的实际规则、保守识别边界与验证结果见 ../../2026-10-17-toolchain-expansion.md。

@@ -1,4 +1,5 @@
 use crate::platform::{excluded, is_link};
+use crate::rules::{Kind, identify};
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -11,46 +12,6 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Kind {
-    Node,
-    Rust,
-    Python,
-}
-
-impl Kind {
-    pub fn directory(self) -> &'static str {
-        match self {
-            Self::Node => "node_modules",
-            Self::Rust => "target",
-            Self::Python => ".venv",
-        }
-    }
-}
-
-pub(crate) fn identify(path: &Path) -> Option<(Kind, &'static str)> {
-    let parent = path.parent()?;
-    let plain_file =
-        |p: PathBuf| fs::symlink_metadata(p).is_ok_and(|m| m.is_file() && !is_link(&m));
-    match path.file_name()?.to_str()? {
-        "node_modules" if plain_file(parent.join("package.json")) => {
-            Some((Kind::Node, "父目录包含 package.json"))
-        }
-        "node_modules" if plain_file(path.join(".package-lock.json")) => {
-            Some((Kind::Node, "包含 npm 安装标识 .package-lock.json"))
-        }
-        "target" if plain_file(parent.join("Cargo.toml")) => {
-            Some((Kind::Rust, "父目录包含 Cargo.toml"))
-        }
-        "target" if plain_file(path.join(".rustc_info.json")) => {
-            Some((Kind::Rust, "包含 .rustc_info.json 构建标识"))
-        }
-        ".venv" if plain_file(path.join("pyvenv.cfg")) => Some((Kind::Python, "包含 pyvenv.cfg")),
-        _ => None,
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct Candidate {
     pub id: u64,
@@ -58,6 +19,7 @@ pub struct Candidate {
     pub root: PathBuf,
     pub project: String,
     pub kind: Kind,
+    pub rule: String,
     pub evidence: String,
     pub bytes: u64,
     pub files: u64,
@@ -298,7 +260,8 @@ impl Engine<'_> {
         }
         self.counters.dirs.fetch_add(1, Ordering::Relaxed);
         self.progress(path);
-        if let Some((kind, evidence)) = identify(path) {
+        if let Some(recognition) = identify(path) {
+            let kind = recognition.kind;
             if self.kinds.contains(&kind) {
                 let id = self.counters.found.fetch_add(1, Ordering::Relaxed) + 1;
                 let mut item = Candidate {
@@ -312,7 +275,8 @@ impl Engine<'_> {
                         .to_string_lossy()
                         .into_owned(),
                     kind,
-                    evidence: evidence.into(),
+                    rule: recognition.rule.into(),
+                    evidence: recognition.evidence.into(),
                     bytes: 0,
                     files: 0,
                     complete: true,

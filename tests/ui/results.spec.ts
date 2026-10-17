@@ -64,7 +64,12 @@ const fixtures: Candidate[] = [
   },
 ];
 
-async function mockDesktop(page: Page, pending = false, failClean = false) {
+async function mockDesktop(
+  page: Page,
+  pending = false,
+  failClean = false,
+  extra: Candidate[] = [],
+) {
   await page.setViewportSize({ width: 1080, height: 650 });
   await page.addInitScript(
     ({ fixtures, pending, failClean }) => {
@@ -99,6 +104,7 @@ async function mockDesktop(page: Page, pending = false, failClean = false) {
                 : "已移入回收站",
             }));
           if (command === "start_scan") {
+            host.lastScanKinds = args.kinds;
             let index = 0;
             const emit = (event: unknown) =>
               callbacks.get(args.onEvent.id)({
@@ -120,8 +126,8 @@ async function mockDesktop(page: Page, pending = false, failClean = false) {
                   progress: {
                     directories: 10,
                     files: 10,
-                    found: 4,
-                    bytes: 15360,
+                    found: fixtures.length,
+                    bytes: fixtures.reduce((sum, item) => sum + item.bytes, 0),
                     errors: pending ? 1 : 0,
                     skipped_links: 0,
                   },
@@ -144,7 +150,7 @@ async function mockDesktop(page: Page, pending = false, failClean = false) {
         },
       };
     },
-    { fixtures, pending, failClean },
+    { fixtures: [...fixtures, ...extra], pending, failClean },
   );
   await page.goto("/");
   await page.getByRole("button", { name: "开始扫描", exact: true }).click();
@@ -275,4 +281,107 @@ test("aggregation preserves large values and distinguishes pending, partial and 
     bytes: 2 * 1024 ** 3 + 77,
     removed: 1,
   });
+});
+
+test("expanded toolchains have correct sums, real directory names and directory menus", async ({
+  page,
+}) => {
+  await mockDesktop(page, false, false, [
+    {
+      ...fixtures[0],
+      id: 5,
+      path: "D:\\demo\\mobile\\app\\build",
+      project: "app",
+      kind: "android",
+      rule: "gradle-build",
+      bytes: 8192,
+    },
+    {
+      ...fixtures[0],
+      id: 6,
+      path: "D:\\demo\\server\\target",
+      project: "server",
+      kind: "java",
+      rule: "maven-target",
+      bytes: 16384,
+    },
+    {
+      ...fixtures[0],
+      id: 7,
+      path: "D:\\demo\\server2\\build",
+      project: "server2",
+      kind: "java",
+      rule: "gradle-build",
+      bytes: 32768,
+    },
+    {
+      ...fixtures[0],
+      id: 8,
+      path: "D:\\demo\\cli\\obj",
+      project: "cli",
+      kind: "dotnet",
+      rule: "dotnet-obj",
+      bytes: 65536,
+    },
+  ]);
+  expect(await page.evaluate(() => (window as any).lastScanKinds)).toHaveLength(
+    16,
+  );
+  const sidebar = page.locator(".language-list");
+  const java = sidebar.getByRole("button", {
+    name: /^Java \/ Kotlin：2 个剩余目录，48 KiB/,
+  });
+  await java.scrollIntoViewIfNeeded();
+  await expect(java).toBeVisible();
+  expect(
+    await page.evaluate(() => ({
+      root: document.documentElement.scrollTop,
+      body: document.body.scrollTop,
+      header: document.querySelector(".topbar")!.getBoundingClientRect().top,
+    })),
+  ).toEqual({ root: 0, body: 0, header: 0 });
+  await expect(page.locator(".main-metric .metric-value")).toContainText(
+    "135 KiB",
+  );
+  await page
+    .getByRole("combobox", { name: "筛选开发环境" })
+    .selectOption("android");
+  await expect(page.locator(".result-row")).toHaveCount(1);
+  await expect(page.locator('[data-candidate-id="5"] .row-size')).toContainText(
+    "8 KiB",
+  );
+  await expect(page.locator('[data-candidate-id="5"]')).toContainText("build");
+  await expect(page.locator('[data-candidate-id="5"]')).not.toContainText(
+    ".gradle",
+  );
+  await page.locator('[data-candidate-id="5"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "打开目录", exact: true }).click();
+  expect(await page.evaluate(() => (window as any).opened)).toEqual([
+    { session: expect.any(String), id: 5 },
+  ]);
+  await page
+    .getByRole("combobox", { name: "筛选开发环境" })
+    .selectOption("java");
+  await expect(page.locator(".result-row")).toHaveCount(2);
+  await expect(java).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.querySelector(".topbar")!.getBoundingClientRect().top,
+    ),
+  ).toBe(0);
+  await page.screenshot({ path: "docs/screenshots/toolchain-results.png" });
+  // Changing settings after the scan must not relabel a scanned empty type as unscanned.
+  await page.getByRole("button", { name: "选择扫描类型" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("checkbox", { name: "Zig", exact: true })
+    .uncheck();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "关闭", exact: true })
+    .last()
+    .click();
+  const zig = sidebar.getByRole("button", { name: /^Zig：0 个剩余目录，0 B/ });
+  await zig.scrollIntoViewIfNeeded();
+  await expect(zig).toBeVisible();
 });

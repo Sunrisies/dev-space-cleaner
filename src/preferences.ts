@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Kind } from "./types";
+import { kinds } from "./types";
 
 export type Preferences = {
   version: 1;
@@ -20,7 +21,7 @@ function validate(value: unknown): Preferences {
     p.roots.some((r) => typeof r !== "string" || !r.trim()) ||
     !Array.isArray(p.kinds) ||
     !p.kinds.length ||
-    p.kinds.some((k) => !["node", "rust", "python"].includes(k)) ||
+    p.kinds.some((k) => !kinds.includes(k)) ||
     !Number.isInteger(p.workers) ||
     p.workers! < 1 ||
     p.workers! > 16 ||

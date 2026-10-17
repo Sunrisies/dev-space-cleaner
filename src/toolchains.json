@@ -1,0 +1,98 @@
+{
+  "node": {
+    "label": "Node.js",
+    "dir": "node_modules",
+    "letter": "JS",
+    "hint": "Node.js、Next.js、Nuxt 依赖与框架产物"
+  },
+  "rust": {
+    "label": "Rust",
+    "dir": "target",
+    "letter": "Rs",
+    "hint": "Cargo 构建产物"
+  },
+  "python": {
+    "label": "Python",
+    "dir": ".venv",
+    "letter": "Py",
+    "hint": "虚拟环境、字节码与 pytest / mypy / Ruff 缓存"
+  },
+  "android": {
+    "label": "Android",
+    "dir": "build / .gradle / .cxx",
+    "letter": "An",
+    "hint": "Android Gradle 构建与本地 C/C++ 产物；不含 SDK"
+  },
+  "java": {
+    "label": "Java / Kotlin",
+    "dir": "target / build / .gradle",
+    "letter": "Jv",
+    "hint": "Maven、Gradle 项目产物"
+  },
+  "dotnet": {
+    "label": ".NET",
+    "dir": "bin / obj",
+    "letter": "C#",
+    "hint": "C#、F#、VB 项目产物"
+  },
+  "cpp": {
+    "label": "C / C++",
+    "dir": "CMakeFiles / meson-logs",
+    "letter": "C+",
+    "hint": "CMake 内部产物、Meson 日志；保留构建配置"
+  },
+  "swift": {
+    "label": "Swift / Obj-C",
+    "dir": ".build",
+    "letter": "Sw",
+    "hint": "Swift Package Manager 项目产物；不含全局 Xcode 缓存"
+  },
+  "dart": {
+    "label": "Dart / Flutter",
+    "dir": ".dart_tool / build",
+    "letter": "Da",
+    "hint": "Dart 工具缓存与 Flutter 构建产物"
+  },
+  "php": {
+    "label": "PHP",
+    "dir": "vendor",
+    "letter": "Ph",
+    "hint": "Composer 安装的项目依赖"
+  },
+  "ruby": {
+    "label": "Ruby",
+    "dir": "vendor/bundle",
+    "letter": "Rb",
+    "hint": "Bundler 安装的项目依赖；保留 .bundle 配置"
+  },
+  "scala": {
+    "label": "Scala",
+    "dir": "target",
+    "letter": "Sc",
+    "hint": "sbt 构建产物"
+  },
+  "elixir": {
+    "label": "Elixir / Erlang",
+    "dir": "_build",
+    "letter": "Ex",
+    "hint": "Mix / Rebar3 项目产物"
+  },
+  "haskell": {
+    "label": "Haskell",
+    "dir": ".stack-work / dist-newstyle",
+    "letter": "Hs",
+    "hint": "Stack / Cabal 项目产物"
+  },
+  "ocaml": {
+    "label": "OCaml",
+    "dir": "_build",
+    "letter": "Oc",
+    "hint": "Dune 构建产物"
+  },
+  "zig": {
+    "label": "Zig",
+    "dir": ".zig-cache / zig-cache",
+    "letter": "Zg",
+    "hint": "Zig 项目缓存；保留 zig-out"
+  }
+}

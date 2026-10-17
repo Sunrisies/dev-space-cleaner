@@ -36,7 +36,7 @@ impl Preferences {
             || self
                 .kinds
                 .iter()
-                .any(|k| !matches!(k.as_str(), "node" | "rust" | "python"))
+                .any(|k| huanj_core::Kind::from_id(k).is_none())
         {
             return Err("请至少选择一种有效的扫描类型".into());
         }
@@ -173,6 +173,30 @@ mod tests {
         invalid.roots.clear();
         assert!(save(&path, &invalid).is_err());
         assert_eq!(load(&path).unwrap(), Some(settings));
+    }
+    #[test]
+    fn expanded_types_round_trip_without_expanding_old_selections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scan-settings.json");
+        let old = example(dir.path());
+        save(&path, &old).unwrap();
+        assert_eq!(load(&path).unwrap().unwrap().kinds, old.kinds);
+        let mut expanded = old;
+        expanded.kinds = huanj_core::Kind::all()
+            .into_iter()
+            .map(|kind| {
+                serde_json::to_value(kind)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        save(&path, &expanded).unwrap();
+        assert_eq!(load(&path).unwrap(), Some(expanded.clone()));
+        expanded.kinds.push("unknown".into());
+        assert!(save(&path, &expanded).is_err());
+        assert_eq!(load(&path).unwrap().unwrap().kinds.len(), 16);
     }
     #[test]
     fn corrupt_settings_are_reported_without_modifying_file() {

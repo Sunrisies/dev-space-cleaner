@@ -1,4 +1,7 @@
-export type Kind = "node" | "rust" | "python";
+import catalog from "./toolchains.json" with { type: "json" };
+export type Kind = keyof typeof catalog;
+export const kinds = Object.keys(catalog) as Kind[];
+export const kindInfo = catalog;
 export type Drive = { path: string; label: string };
 export type Candidate = {
   id: number;
@@ -6,6 +9,7 @@ export type Candidate = {
   root: string;
   project: string;
   kind: Kind;
+  rule?: string;
   evidence: string;
   bytes: number;
   files: number;
@@ -50,14 +54,14 @@ export const emptyProgress: Progress = {
   errors: 0,
   skipped_links: 0,
 };
-export const kindInfo: Record<
-  Kind,
-  { label: string; dir: string; letter: string }
-> = {
-  node: { label: "Node.js", dir: "node_modules", letter: "JS" },
-  rust: { label: "Rust", dir: "target", letter: "Rs" },
-  python: { label: "Python", dir: ".venv", letter: "Py" },
-};
+export function directoryName(item: Candidate): string {
+  return (
+    displayPath(item.path)
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || item.path
+  );
+}
 export function size(bytes: number): string {
   if (!bytes) return "0 B";
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];

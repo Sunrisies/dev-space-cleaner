@@ -25,13 +25,22 @@ test("restores custom roots, types and workers, then preserves them across save 
     page.getByText("2 个目录 · 已保存", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("checkbox", { name: "target", exact: true }),
-  ).not.toBeChecked();
+    page.getByRole("button", { name: /^Android：0 个剩余目录，未扫描/ }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "开始扫描", exact: true }),
   ).toBeEnabled();
   await page.getByRole("button", { name: "调整范围", exact: true }).click();
   const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByRole("checkbox", { name: "Rust", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    dialog.getByRole("checkbox", { name: "Android", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    dialog.getByRole("checkbox", { name: "Python", exact: true }),
+  ).toBeChecked();
   await expect(
     dialog.getByText(preset.roots[0], { exact: true }),
   ).toBeVisible();
@@ -111,4 +120,55 @@ test("failed save keeps the previous stored settings and displays an error", asy
   await expect(
     dialog.getByRole("button", { name: "保存设置", exact: true }),
   ).toBeEnabled();
+});
+
+test("searchable project types save expanded selections and stay within a small window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 960, height: 570 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "选择扫描类型" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("checkbox")).toHaveCount(16);
+  const search = dialog.getByRole("textbox", { name: "搜索语言或工具链" });
+  await search.fill("Android");
+  await expect(dialog.getByRole("checkbox")).toHaveCount(1);
+  await dialog
+    .getByRole("checkbox", { name: "Android", exact: true })
+    .uncheck();
+  await search.fill("Maven");
+  await expect(
+    dialog.getByRole("checkbox", { name: "Java / Kotlin", exact: true }),
+  ).toBeChecked();
+  await search.fill("不存在的语言");
+  await expect(dialog.getByText("没有匹配的项目类型。")).toBeVisible();
+  await search.fill("");
+  await dialog
+    .getByRole("checkbox", { name: "Zig", exact: true })
+    .scrollIntoViewIfNeeded();
+  await expect(
+    dialog.getByRole("checkbox", { name: "Zig", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollHeight > innerHeight,
+    ),
+  ).toBe(false);
+  await page.screenshot({ path: "docs/screenshots/toolchain-settings.png" });
+  await dialog.getByRole("button", { name: "保存设置", exact: true }).click();
+  const stored = await page.evaluate(
+    (key) => JSON.parse(localStorage.getItem(key)!),
+    key,
+  );
+  expect(stored.kinds).toHaveLength(15);
+  expect(stored.kinds).not.toContain("android");
+  expect(stored.kinds).toContain("java");
+  await page.reload();
+  await page.getByRole("button", { name: "选择扫描类型" }).click();
+  await expect(
+    dialog.getByRole("checkbox", { name: "Android", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    dialog.getByRole("checkbox", { name: "Java / Kotlin", exact: true }),
+  ).toBeChecked();
 });

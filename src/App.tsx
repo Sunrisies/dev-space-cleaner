@@ -9,6 +9,7 @@ import {
 import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { ToolchainPicker } from "./ToolchainPicker";
 import { summarize } from "./summary";
 import {
   loadPreferences,
@@ -45,6 +46,8 @@ import {
 } from "lucide-react";
 import {
   displayPath,
+  directoryName,
+  kinds,
   emptyProgress,
   kindInfo,
   size,
@@ -57,7 +60,6 @@ import {
   type Summary,
 } from "./types";
 
-const kinds: Kind[] = ["node", "rust", "python"];
 type Theme = "system" | "light" | "dark";
 type RootStatus = {
   phase: "scanning" | "done" | "cancelled" | "skipped";
@@ -106,6 +108,7 @@ export default function App() {
   const [mode, setMode] = useState<"all" | "custom">("all");
   const [customRoots, setCustomRoots] = useState<string[]>([]);
   const [enabledKinds, setEnabledKinds] = useState<Set<Kind>>(new Set(kinds));
+  const [scanKinds, setScanKinds] = useState<ReadonlySet<Kind> | null>(null);
   const [filter, setFilter] = useState<Kind | "all">("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"size" | "name">("size");
@@ -305,6 +308,7 @@ export default function App() {
   const remainingCount = kinds.reduce((sum, k) => sum + totals[k].count, 0);
   const totalText = (kind: Kind) => {
     const total = totals[kind];
+    if (!total.count && !(scanKinds ?? enabledKinds).has(kind)) return "未扫描";
     if (!summary && !scanning && !allItems.length) return "等待扫描";
     const label =
       scanning || total.pending
@@ -404,6 +408,7 @@ export default function App() {
       return;
     }
     const id = crypto.randomUUID();
+    setScanKinds(new Set(enabledKinds));
     session.current = id;
     staged.current.clear();
     setItems(new Map());
@@ -562,21 +567,23 @@ export default function App() {
         <div className="nav-label languages-label">
           开发环境<span>逻辑体积汇总</span>
         </div>
-        {kinds.map((k) => (
-          <button
-            key={k}
-            className={`nav-item language-nav ${filter === k ? "active" : ""}`}
-            aria-label={`${kindInfo[k].label}：${totals[k].count} 个剩余目录，${totalText(k)}`}
-            onClick={() => setFilter(filter === k ? "all" : k)}
-          >
-            <span className={`lang-icon ${k}`}>{kindInfo[k].letter}</span>
-            <span className="language-copy">
-              <span>{kindInfo[k].label}</span>
-              <small>{totalText(k)}</small>
-            </span>
-            <span className="nav-count">{totals[k].count}</span>
-          </button>
-        ))}
+        <div className="language-list" aria-label="开发环境大小汇总">
+          {kinds.map((k) => (
+            <button
+              key={k}
+              className={`nav-item language-nav ${filter === k ? "active" : ""}`}
+              aria-label={`${kindInfo[k].label}：${totals[k].count} 个剩余目录，${totalText(k)}`}
+              onClick={() => setFilter(filter === k ? "all" : k)}
+            >
+              <span className={`lang-icon ${k}`}>{kindInfo[k].letter}</span>
+              <span className="language-copy">
+                <span>{kindInfo[k].label}</span>
+                <small>{totalText(k)}</small>
+              </span>
+              <span className="nav-count">{totals[k].count}</span>
+            </button>
+          ))}
+        </div>
         <div className="sidebar-bottom">
           <div className="local-note">
             <ShieldCheck size={18} />
@@ -592,7 +599,7 @@ export default function App() {
           <button className="nav-item" onClick={() => setHelp(true)}>
             <CircleHelp size={17} />
             <span>使用说明</span>
-            <span className="version">v0.1.5</span>
+            <span className="version">v0.2.0</span>
           </button>
         </div>
       </aside>
@@ -715,29 +722,15 @@ export default function App() {
             <div className="scan-bottom">
               <div className="type-toggles">
                 <span>扫描类型</span>
-                {kinds.map((k) => (
-                  <label
-                    key={k}
-                    className={`type-chip ${enabledKinds.has(k) ? "enabled" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={enabledKinds.has(k)}
-                      disabled={busy}
-                      onChange={() =>
-                        setEnabledKinds((old) => {
-                          const next = new Set(old);
-                          if (next.has(k)) next.delete(k);
-                          else next.add(k);
-                          return next;
-                        })
-                      }
-                    />
-                    <span className={`type-dot ${k}`} />
-                    {kindInfo[k].dir}
-                    {enabledKinds.has(k) && <Check size={12} />}
-                  </label>
-                ))}
+                <button
+                  className="type-select-button"
+                  disabled={busy}
+                  onClick={() => setSettings(true)}
+                  aria-label="选择扫描类型"
+                >
+                  {enabledKinds.size} / {kinds.length} 类项目{" "}
+                  <Settings2 size={12} />
+                </button>
               </div>
               <span className="safe-hint">
                 <ShieldCheck size={13} />
@@ -786,13 +779,10 @@ export default function App() {
                 <small>个目录</small>
               </div>
               <div className="language-summary">
-                {kinds.map((k) => (
-                  <span key={k}>
-                    <i className={`type-dot ${k}`} />
-                    {kindInfo[k].label}
-                    <b>{totals[k].count}</b>
-                  </span>
-                ))}
+                <span>
+                  {kinds.filter((k) => totals[k].count > 0).length} 类有结果
+                </span>
+                <span>分类大小见左侧列表</span>
               </div>
             </div>
             <div className="metric">
@@ -846,22 +836,19 @@ export default function App() {
               <h2>
                 扫描结果<span>{visible.length}</span>
               </h2>
-              <div className="result-tabs">
-                <div className="tabs">
-                  {(["all", ...kinds] as const).map((k) => (
-                    <button
-                      className={filter === k ? "selected" : ""}
-                      key={k}
-                      onClick={() => setFilter(k)}
-                    >
-                      {k === "all" ? "全部目录" : kindInfo[k].label}
-                      <span>
-                        {k === "all" ? allItems.length : totals[k].count}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <select
+                className="kind-filter"
+                aria-label="筛选开发环境"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value as Kind | "all")}
+              >
+                <option value="all">全部目录 · {allItems.length}</option>
+                {kinds.map((k) => (
+                  <option key={k} value={k}>
+                    {kindInfo[k].label} · {totals[k].count}
+                  </option>
+                ))}
+              </select>
               <div className="results-tools">
                 <label className="search">
                   <Search size={15} />
@@ -953,7 +940,7 @@ export default function App() {
                             checked={selected.has(item.id)}
                             onChange={() => toggleSelected(item.id)}
                             disabled={busy || !selectable(item)}
-                            aria-label={`选择 ${item.project} 的 ${kindInfo[item.kind].dir}`}
+                            aria-label={`选择 ${item.project} 的 ${directoryName(item)}`}
                           />
                         </label>
                         <button
@@ -968,7 +955,7 @@ export default function App() {
                               {item.project}
                               <span className="folder-suffix">
                                 {" "}
-                                / {kindInfo[item.kind].dir}
+                                / {directoryName(item)}
                               </span>
                             </strong>
                             <small title={displayPath(item.path)}>
@@ -1051,7 +1038,7 @@ export default function App() {
                     <div className="empty-tags">
                       <span>
                         <Code2 size={13} />
-                        三种开发环境
+                        16 类开发生态
                       </span>
                       <span>
                         <HardDrive size={13} />
@@ -1176,7 +1163,7 @@ export default function App() {
           }}
         >
           <div className="context-caption">
-            {contextItem.project} / {kindInfo[contextItem.kind].dir}
+            {contextItem.project} / {directoryName(contextItem)}
           </div>
           <button
             autoFocus={!cleaning && !removed.has(contextItem.id)}
@@ -1266,6 +1253,13 @@ export default function App() {
                 <small>只扫描你选择的位置</small>
                 {mode === "custom" && <Check size={16} />}
               </button>
+            </div>
+            <div className="settings-section">
+              <ToolchainPicker
+                selected={enabledKinds}
+                onChange={setEnabledKinds}
+                disabled={busy}
+              />
             </div>
             <div className="settings-section">
               <h3>{mode === "all" ? "检测到的磁盘" : "自定义目录"}</h3>
@@ -1390,7 +1384,7 @@ export default function App() {
               {kindInfo[detail.kind].label}
             </span>
             <h3 className="detail-title">
-              {detail.project} / {kindInfo[detail.kind].dir}
+              {detail.project} / {directoryName(detail)}
             </h3>
             <code className="detail-path">{displayPath(detail.path)}</code>
             <dl className="detail-list">
@@ -1449,7 +1443,10 @@ export default function App() {
             <p>
               清理后，相应项目可能需要重新安装依赖、重建虚拟环境或重新编译。请确认其中没有手动存放的重要文件。
             </p>
-            {chosen.some((i) => i.kind === "python") && (
+            {chosen.some(
+              (i) =>
+                i.rule === "python-venv" || (!i.rule && i.kind === "python"),
+            ) && (
               <p className="warning">
                 包含 Python 虚拟环境，其已安装的包和环境内文件将一并移入回收站。
               </p>
@@ -1506,9 +1503,9 @@ export default function App() {
           <div className="modal-body help-body">
             <Sparkles size={28} className="accent" />
             <p>
-              缓境寻找项目里的 <code>node_modules</code>、<code>target</code> 和{" "}
-              <code>.venv</code>
-              ，并通过项目标识确认目录类型。同名目录不一定会被识别。
+              缓境支持 16 类开发生态的项目依赖与构建目录，包括
+              Android、Java、.NET、Flutter
+              等。扫描同时核对项目和生成标识，同名目录不一定会被识别。可在扫描设置中搜索、选择类型并保存。
             </p>
             <h3>默认扫描所有磁盘</h3>
             <p>

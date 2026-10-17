@@ -4,6 +4,7 @@ import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { readFileSync } from "node:fs";
+import catalog from "../src/toolchains.json" with { type: "json" };
 const args = process.argv.slice(2);
 const expected = new Map();
 let roots = args;
@@ -13,7 +14,7 @@ if (args[0] === "--scan") {
     .trim()
     .split(/\r?\n/)
     .map((line) => JSON.parse(line));
-  roots = ["node", "rust", "python"]
+  roots = Object.keys(catalog)
     .map(
       (kind) =>
         records

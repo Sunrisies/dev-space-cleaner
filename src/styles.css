@@ -1566,3 +1566,136 @@ p {
     transition: none !important;
   }
 }
+
+/* Toolchain catalog: scrolling is confined to lists and dialog content. */
+.sidebar > :not(.language-list) {
+  flex-shrink: 0;
+}
+.language-list {
+  min-height: 0;
+  overflow-y: auto;
+  flex: 1;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #465a5c transparent;
+}
+.lang-icon {
+  flex-shrink: 0;
+  background: #294340;
+  color: #a2cfc5;
+}
+.type-dot {
+  background: var(--accent);
+}
+.type-select-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  padding: 4px 9px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 10px;
+}
+.kind-filter {
+  min-width: 0;
+  width: 142px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 6px;
+  font-size: 10px;
+}
+.toolchain-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.toolchain-heading h3 small {
+  color: var(--muted);
+  margin-left: 8px;
+  font-weight: 400;
+}
+.toolchain-picker .type-search {
+  width: 100%;
+  margin: 8px 0;
+}
+.toolchain-list {
+  max-height: 232px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  margin-bottom: 10px;
+}
+.toolchain-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.toolchain-option:last-child {
+  border-bottom: 0;
+}
+.toolchain-option.chosen {
+  background: var(--accent-soft);
+}
+.toolchain-option > span:last-child {
+  min-width: 0;
+}
+.toolchain-option strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+}
+.toolchain-option small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.toolchain-list > p {
+  padding: 12px;
+}
+.kind-badge {
+  white-space: nowrap;
+  font-size: 9px;
+}
+.sidebar .language-copy > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.result-row .kind-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+@media (max-height: 740px) {
+  .sidebar .brand {
+    padding-bottom: 20px;
+  }
+  .sidebar .languages-label {
+    margin-top: 16px;
+    margin-bottom: 8px;
+  }
+  .sidebar .language-nav {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+  .sidebar .local-note {
+    padding: 9px;
+    margin: 12px 3px;
+  }
+  .sidebar .local-note p {
+    display: none;
+  }
+}

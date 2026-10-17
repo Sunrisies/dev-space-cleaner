@@ -7,9 +7,12 @@ use std::{
 fn main() {
     let mut args = Vec::new();
     let mut workers = 8;
+    let mut kinds = Kind::all();
     let mut input = std::env::args_os().skip(1);
     while let Some(arg) = input.next() {
-        if arg == "--workers" {
+        if arg == "--legacy-types" {
+            kinds = vec![Kind::Node, Kind::Rust, Kind::Python];
+        } else if arg == "--workers" {
             workers = input
                 .next()
                 .expect("--workers needs a value")
@@ -33,7 +36,7 @@ fn main() {
     scan(
         ScanOptions {
             roots,
-            kinds: vec![Kind::Node, Kind::Rust, Kind::Python],
+            kinds,
             workers,
         },
         Arc::new(AtomicBool::new(false)),
