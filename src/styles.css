@@ -1163,6 +1163,12 @@ p {
   gap: 10px;
   background: var(--soft);
 }
+.settings-save-status {
+  margin-right: auto;
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
+}
 .scope-options {
   display: grid;
   grid-template-columns: 1fr 1fr;

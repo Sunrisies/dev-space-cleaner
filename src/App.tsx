@@ -10,6 +10,11 @@ import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  loadPreferences,
+  savePreferences,
+  type Preferences,
+} from "./preferences";
+import {
   ArrowDownWideNarrow,
   ArrowUpRight,
   Check,
@@ -132,10 +137,75 @@ export default function App() {
     }
   });
   const [workers, setWorkers] = useState(8);
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const [savingPreferences, setSavingPreferences] = useState(false);
+  const [preferencesError, setPreferencesError] = useState("");
+  const [savedPreferences, setSavedPreferences] = useState<Preferences | null>(
+    null,
+  );
   const session = useRef("");
   const staged = useRef(new Map<number, Candidate>());
-  const busy = scanning || cleaning;
+  const busy = scanning || cleaning || !preferencesReady || savingPreferences;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const currentPreferences = useMemo<Preferences>(
+    () => ({
+      version: 1,
+      mode,
+      roots: customRoots,
+      kinds: kinds.filter((k) => enabledKinds.has(k)),
+      workers,
+    }),
+    [mode, customRoots, enabledKinds, workers],
+  );
+  const preferencesSaved =
+    savedPreferences !== null &&
+    JSON.stringify(currentPreferences) === JSON.stringify(savedPreferences);
+
+  useEffect(() => {
+    let live = true;
+    loadPreferences(native)
+      .then((saved) => {
+        if (!live) return;
+        if (saved) {
+          setMode(saved.mode);
+          setCustomRoots(saved.roots);
+          setEnabledKinds(new Set(saved.kinds));
+          setWorkers(saved.workers);
+          setSavedPreferences(saved);
+        }
+      })
+      .catch((error) => {
+        if (live)
+          setMessage(
+            `读取扫描设置失败：${String(error)}。当前使用默认设置，原配置未改动。`,
+          );
+      })
+      .finally(() => {
+        if (live) setPreferencesReady(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [native]);
+
+  useEffect(() => {
+    if (settings) setPreferencesError("");
+  }, [settings]);
+
+  async function rememberSettings() {
+    if (busy) return;
+    setSavingPreferences(true);
+    setPreferencesError("");
+    try {
+      await savePreferences(native, currentPreferences);
+      setSavedPreferences(currentPreferences);
+      setSettings(false);
+    } catch (error) {
+      setPreferencesError(String(error));
+    } finally {
+      setSavingPreferences(false);
+    }
+  }
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
@@ -436,7 +506,7 @@ export default function App() {
           <button className="nav-item" onClick={() => setHelp(true)}>
             <CircleHelp size={17} />
             <span>使用说明</span>
-            <span className="version">v0.1.2</span>
+            <span className="version">v0.1.3</span>
           </button>
         </div>
       </aside>
@@ -508,8 +578,10 @@ export default function App() {
                   {mode === "all" ? "全盘扫描" : "自定义目录"}
                   <span className="tag">
                     {mode === "all"
-                      ? "默认范围"
-                      : `${customRoots.length} 个目录`}
+                      ? preferencesSaved
+                        ? "已保存"
+                        : "默认范围"
+                      : `${customRoots.length} 个目录${preferencesSaved ? " · 已保存" : ""}`}
                   </span>
                 </strong>
                 <p>
@@ -963,7 +1035,7 @@ export default function App() {
         <Modal title="扫描设置" onClose={() => setSettings(false)} wide>
           <div className="modal-body">
             <p className="modal-description">
-              默认覆盖所有已挂载磁盘，也可以只检查指定的项目目录。
+              选择扫描范围后点击“保存设置”，下次启动会自动恢复目录、扫描类型和线程数。
             </p>
             <div className="scope-options">
               <button
@@ -1048,6 +1120,9 @@ export default function App() {
                   disabled={busy}
                   onChange={(e) => setWorkers(Number(e.target.value))}
                 >
+                  {![1, 2, 4, 8, 16].includes(workers) && (
+                    <option value={workers}>{workers}</option>
+                  )}
                   {[1, 2, 4, 8, 16].map((n) => (
                     <option key={n} value={n}>
                       {n}
@@ -1064,13 +1139,37 @@ export default function App() {
             <p className="small muted">
               系统目录与链接会跳过。磁盘未就绪或权限不足时记录错误并继续其他磁盘。
             </p>
+            {preferencesError && (
+              <p className="error-text small" role="alert">
+                {preferencesError}
+              </p>
+            )}
           </div>
           <div className="modal-footer">
+            <span className="settings-save-status" role="status">
+              {!preferencesReady
+                ? "正在读取设置…"
+                : preferencesSaved
+                  ? "已保存，下次启动自动恢复"
+                  : "本次更改尚未保存"}
+            </span>
             <button
-              className="button primary"
+              className="button secondary"
+              disabled={savingPreferences}
               onClick={() => setSettings(false)}
             >
-              完成
+              关闭
+            </button>
+            <button
+              className="button primary"
+              disabled={
+                busy ||
+                !enabledKinds.size ||
+                (mode === "custom" && !customRoots.length)
+              }
+              onClick={rememberSettings}
+            >
+              {savingPreferences ? "保存中…" : "保存设置"}
             </button>
           </div>
         </Modal>

@@ -48,6 +48,7 @@ jobs:
       - run: npm ci
       - run: cargo fmt --all --check
       - run: cargo test -p huanj-core -- --nocapture
+      - run: cargo test -p huanj --lib preferences::tests
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: npm run tauri build -- --no-bundle --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4

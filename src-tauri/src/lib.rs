@@ -1,6 +1,8 @@
+mod preferences;
 use huanj_core::{
     Candidate, CleanResult, Drive, Kind, ScanEvent, ScanOptions, clean, drives, scan,
 };
+use preferences::PreferencesLock;
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -205,11 +207,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .manage(PreferencesLock::default())
         .invoke_handler(tauri::generate_handler![
             list_drives,
             start_scan,
             cancel_scan,
-            clean_selected
+            clean_selected,
+            preferences::load_preferences,
+            preferences::save_preferences
         ])
         .run(tauri::generate_context!())
         .expect("无法启动缓境");
