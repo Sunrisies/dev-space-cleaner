@@ -26,6 +26,8 @@ pub struct Preferences {
     global_mode: bool,
     #[serde(default)]
     global_ids: Vec<String>,
+    #[serde(default)]
+    history_enabled: bool,
 }
 
 impl Preferences {
@@ -165,6 +167,7 @@ mod tests {
             workers: 8,
             global_mode: false,
             global_ids: vec![],
+            history_enabled: false,
         }
     }
     #[test]

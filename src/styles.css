@@ -1406,6 +1406,15 @@ p {
   justify-content: space-between;
   margin-bottom: 8px;
 }
+.history-setting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.refresh-button {
+  margin-top: 12px;
+}
 .worker-control select {
   background: var(--soft);
   border: 1px solid var(--line);

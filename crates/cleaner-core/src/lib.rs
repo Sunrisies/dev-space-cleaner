@@ -10,5 +10,5 @@ pub use cleaner::{CleanResult, clean, validate as validate_candidate};
 pub use platform::{Drive, drives, is_link};
 pub use rules::Kind;
 pub use scanner::{
-    Candidate, Progress, ScanEvent, ScanOptions, ScanSummary, scan, scan_global_caches,
+    Candidate, Progress, ScanEvent, ScanOptions, ScanSummary, refresh_one, scan, scan_global_caches,
 };

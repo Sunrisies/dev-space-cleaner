@@ -10,6 +10,7 @@ export type Preferences = {
   workers: number;
   global_mode?: boolean;
   global_ids?: string[];
+  history_enabled?: boolean;
 };
 export const preferencesKey = "huanj-scan-settings-v1";
 
@@ -28,6 +29,8 @@ function validate(value: unknown): Preferences {
     p.workers! < 1 ||
     p.workers! > 16 ||
     (p.global_mode !== undefined && typeof p.global_mode !== "boolean") ||
+    (p.history_enabled !== undefined &&
+      typeof p.history_enabled !== "boolean") ||
     (p.global_ids !== undefined &&
       (!Array.isArray(p.global_ids) ||
         p.global_ids.length > 100 ||
@@ -43,6 +46,7 @@ function validate(value: unknown): Preferences {
     ...(p as Preferences),
     global_mode: p.global_mode ?? false,
     global_ids: p.global_ids ?? [],
+    history_enabled: p.history_enabled ?? false,
   };
 }
 

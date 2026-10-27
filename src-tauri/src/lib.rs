@@ -1,7 +1,8 @@
 mod directory;
+mod history;
 mod preferences;
 use huanj_core::{
-    Candidate, CleanResult, Drive, Kind, ScanEvent, ScanOptions, clean, drives, scan,
+    Candidate, CleanResult, Drive, Kind, ScanEvent, ScanOptions, clean, drives, refresh_one, scan,
     scan_global_caches, validate_candidate,
 };
 use preferences::PreferencesLock;
@@ -29,9 +30,58 @@ struct Session {
     busy: bool,
     cancel: Arc<AtomicBool>,
     candidates: HashMap<u64, Candidate>,
+    history_mode: bool,
 }
 #[derive(Default)]
 struct AppState(Arc<Mutex<Session>>);
+
+#[tauri::command]
+async fn refresh_candidate(
+    session: String,
+    id: u64,
+    path: String,
+    kind: String,
+    rule: String,
+    state: State<'_, AppState>,
+) -> Result<Candidate, String> {
+    if session.is_empty() || rule.is_empty() {
+        return Err("缺少扫描会话或目录识别规则".into());
+    }
+    let kind = Kind::from_id(&kind).ok_or("未知扫描类型")?;
+    let path = PathBuf::from(path);
+    let shared = state.0.clone();
+    {
+        let mut current = shared.lock().map_err(|e| e.to_string())?;
+        if current.busy {
+            return Err("当前任务尚未结束".into());
+        }
+        if current.id.is_empty() {
+            current.id = session.clone();
+            current.history_mode = true;
+        }
+        if current.id != session {
+            return Err("扫描会话已过期，请重新扫描".into());
+        }
+        if !current.history_mode {
+            let original = current
+                .candidates
+                .get(&id)
+                .ok_or("候选目录不存在，请重新扫描")?;
+            if original.path != path || original.kind != kind || original.rule != rule {
+                return Err("候选目录身份不匹配，请重新扫描".into());
+            }
+        }
+        current.candidates.remove(&id);
+        current.busy = true;
+    }
+    let result =
+        tauri::async_runtime::spawn_blocking(move || refresh_one(path, id, kind, &rule)).await;
+    let mut current = shared.lock().map_err(|e| e.to_string())?;
+    current.busy = false;
+    let item = result.map_err(|e| format!("刷新任务失败：{e}"))??;
+    current.candidates.insert(id, item.clone());
+    Ok(item)
+}
 
 fn take_selection(
     current: &mut Session,
@@ -168,6 +218,7 @@ fn start_scan(
             busy: true,
             cancel: cancel.clone(),
             candidates: HashMap::new(),
+            history_mode: false,
         };
     }
     std::thread::spawn(move || {
@@ -316,16 +367,20 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .manage(PreferencesLock::default())
+        .manage(history::HistoryLock::default())
         .invoke_handler(tauri::generate_handler![
             list_drives,
             list_global_caches,
             start_scan,
             cancel_scan,
             preview_selected,
+            refresh_candidate,
             clean_selected,
             open_candidate_directory,
             preferences::load_preferences,
-            preferences::save_preferences
+            preferences::save_preferences,
+            history::load_scan_history,
+            history::save_scan_history
         ])
         .run(tauri::generate_context!())
         .expect("无法启动缓境");

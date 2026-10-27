@@ -129,10 +129,11 @@ test("searchable project types save expanded selections and stay within a small 
   await page.goto("/");
   await page.getByRole("button", { name: "选择扫描类型" }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("checkbox")).toHaveCount(16);
+  const types = dialog.getByRole("region", { name: "项目扫描类型" });
+  await expect(types.getByRole("checkbox")).toHaveCount(16);
   const search = dialog.getByRole("textbox", { name: "搜索语言或工具链" });
   await search.fill("Android");
-  await expect(dialog.getByRole("checkbox")).toHaveCount(1);
+  await expect(types.getByRole("checkbox")).toHaveCount(1);
   await dialog
     .getByRole("checkbox", { name: "Android", exact: true })
     .uncheck();

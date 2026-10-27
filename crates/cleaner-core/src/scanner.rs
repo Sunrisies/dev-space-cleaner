@@ -32,6 +32,84 @@ pub struct Candidate {
     pub(crate) created: Option<SystemTime>,
 }
 
+/// Re-identify and measure exactly one previously displayed directory.
+pub fn refresh_one(path: PathBuf, id: u64, kind: Kind, rule: &str) -> Result<Candidate, String> {
+    if !path.is_absolute()
+        || path
+            .ancestors()
+            .any(|p| !fs::symlink_metadata(p).is_ok_and(|m| !is_link(&m) && m.is_dir()))
+    {
+        return Err("目录或上级路径不可访问，或包含链接".into());
+    }
+    let canonical = fs::canonicalize(&path).map_err(|e| format!("无法解析目录：{e}"))?;
+    if let Some(global_id) = rule.strip_prefix("global:") {
+        let entry = crate::global_cache::discover_system()
+            .into_iter()
+            .find(|entry| {
+                entry.id == global_id && fs::canonicalize(&entry.path).is_ok_and(|p| p == canonical)
+            })
+            .ok_or("全局缓存识别依据已变化")?;
+        let result = Mutex::new(None);
+        scan_global_caches(vec![entry], 1, Arc::new(AtomicBool::new(false)), |event| {
+            if let ScanEvent::Sized(item) = event {
+                *result.lock().unwrap() = Some(item);
+            }
+        });
+        let mut item = result
+            .into_inner()
+            .map_err(|_| "刷新结果锁异常")?
+            .ok_or("无法重新统计该缓存")?;
+        if item.kind != kind || item.rule != rule {
+            return Err("缓存类型已变化，请重新扫描".into());
+        }
+        item.id = id;
+        return Ok(item);
+    }
+    let recognition = identify(&canonical).ok_or("项目识别依据已变化，请重新扫描")?;
+    if recognition.kind != kind || recognition.rule != rule {
+        return Err("项目识别依据已变化，请重新扫描".into());
+    }
+    let parent = canonical.parent().ok_or("目录没有上级路径")?.to_path_buf();
+    let meta = fs::symlink_metadata(&canonical).map_err(|e| e.to_string())?;
+    let project = parent
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let cancel = AtomicBool::new(false);
+    let sink = |_event| {};
+    let engine = Engine {
+        cancel: &cancel,
+        counters: Counters::default(),
+        last_tick: Mutex::new(Instant::now()),
+        sink: &sink,
+        kinds: &[],
+    };
+    let mut item = Candidate {
+        id,
+        path: canonical,
+        root: parent,
+        project,
+        kind,
+        rule: rule.into(),
+        evidence: recognition.evidence.into(),
+        bytes: 0,
+        files: 0,
+        complete: true,
+        measured: false,
+        skipped_links: 0,
+        errors: 0,
+        modified: meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()),
+        created: meta.created().ok(),
+    };
+    engine.measure(&mut item);
+    Ok(item)
+}
+
 /// Scan a separately selected set of global caches. Never mixes project candidates.
 pub fn scan_global_caches(
     caches: Vec<crate::global_cache::GlobalCache>,

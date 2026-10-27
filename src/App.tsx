@@ -12,6 +12,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ToolchainPicker } from "./ToolchainPicker";
 import { groupProjects, volumeOf } from "./project-groups";
 import { cleanupImpact } from "./cleanup-impact";
+import { loadHistory, saveHistory } from "./history";
 import { summarize } from "./summary";
 import {
   loadPreferences,
@@ -138,6 +139,12 @@ export default function App() {
   const [cancelling, setCancelling] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [historyEnabled, setHistoryEnabled] = useState(false);
+  const [historyDisplay, setHistoryDisplay] = useState(false);
+  const [historyTime, setHistoryTime] = useState<number | null>(null);
+  const [staleIds, setStaleIds] = useState<Set<number>>(new Set());
+  const [refreshError, setRefreshError] = useState("");
   const [preflight, setPreflight] = useState<Map<number, PreflightResult>>(
     new Map(),
   );
@@ -178,9 +185,16 @@ export default function App() {
     null,
   );
   const session = useRef("");
+  const historyWriter = useRef<Promise<void>>(Promise.resolve());
+  const lastHistorySignature = useRef("");
   const staged = useRef(new Map<number, Candidate>());
   const busy =
-    scanning || cleaning || checking || !preferencesReady || savingPreferences;
+    scanning ||
+    cleaning ||
+    checking ||
+    refreshing ||
+    !preferencesReady ||
+    savingPreferences;
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentPreferences = useMemo<Preferences>(
     () => ({
@@ -191,8 +205,17 @@ export default function App() {
       workers,
       global_mode: globalMode,
       global_ids: Array.from(globalIds).sort(),
+      history_enabled: historyEnabled,
     }),
-    [mode, customRoots, enabledKinds, workers, globalMode, globalIds],
+    [
+      mode,
+      customRoots,
+      enabledKinds,
+      workers,
+      globalMode,
+      globalIds,
+      historyEnabled,
+    ],
   );
   const preferencesSaved =
     savedPreferences !== null &&
@@ -201,7 +224,7 @@ export default function App() {
   useEffect(() => {
     let live = true;
     loadPreferences(native)
-      .then((saved) => {
+      .then(async (saved) => {
         if (!live) return;
         if (saved) {
           setMode(saved.mode);
@@ -210,7 +233,28 @@ export default function App() {
           setWorkers(saved.workers);
           setGlobalMode(saved.global_mode ?? false);
           setGlobalIds(new Set(saved.global_ids ?? []));
+          setHistoryEnabled(saved.history_enabled ?? false);
           setSavedPreferences(saved);
+          if (saved.history_enabled) {
+            try {
+              const history = await loadHistory(native);
+              if (live && history) {
+                session.current = crypto.randomUUID();
+                setItems(new Map(history.items.map((item) => [item.id, item])));
+                setStaleIds(new Set(history.items.map((item) => item.id)));
+                setScanKinds(new Set(history.scan_kinds));
+                setSummary(history.summary);
+                setProgress(history.summary.progress);
+                setHistoryTime(history.saved_at);
+                setHistoryDisplay(true);
+              }
+            } catch (error) {
+              if (live)
+                setMessage(
+                  `读取历史记录失败：${String(error)}。原记录未改动。`,
+                );
+            }
+          }
         }
       })
       .catch((error) => {
@@ -252,6 +296,9 @@ export default function App() {
   useEffect(() => {
     if (settings) setPreferencesError("");
   }, [settings]);
+  useEffect(() => {
+    setRefreshError("");
+  }, [detailSnapshot?.id]);
 
   async function rememberSettings() {
     if (busy) return;
@@ -317,6 +364,44 @@ export default function App() {
       ),
     [cleanResults],
   );
+  useEffect(() => {
+    if (
+      !savedPreferences?.history_enabled ||
+      !summary ||
+      historyTime === null ||
+      historyDisplay ||
+      busy
+    )
+      return;
+    const snapshot = {
+      version: 1 as const,
+      saved_at: historyTime,
+      items: allItems.filter((item) => !removed.has(item.id)),
+      summary,
+      scan_kinds: Array.from(scanKinds ?? []),
+    };
+    const signature = JSON.stringify(snapshot);
+    if (signature === lastHistorySignature.current) return;
+    lastHistorySignature.current = signature;
+    historyWriter.current = historyWriter.current
+      .catch(() => {})
+      .then(() => saveHistory(native, snapshot));
+    historyWriter.current.catch((error) => {
+      if (lastHistorySignature.current === signature)
+        lastHistorySignature.current = "";
+      setMessage(`保存历史记录失败：${String(error)}`);
+    });
+  }, [
+    savedPreferences,
+    summary,
+    historyTime,
+    historyDisplay,
+    busy,
+    allItems,
+    removed,
+    scanKinds,
+    native,
+  ]);
   const contextItem = contextMenu ? items.get(contextMenu.id) : null;
   const detail =
     detailSnapshot && (items.get(detailSnapshot.id) ?? detailSnapshot);
@@ -354,7 +439,10 @@ export default function App() {
     modifiedFilter,
   ]);
   const selectable = (i: Candidate) =>
-    i.measured && i.complete && !cleanResults.get(i.id)?.success;
+    i.measured &&
+    i.complete &&
+    !staleIds.has(i.id) &&
+    !cleanResults.get(i.id)?.success;
   const chosen = allItems.filter((i) => selected.has(i.id) && selectable(i));
   const chosenBytes = chosen.reduce((s, i) => s + i.bytes, 0);
   const eligible = visible.filter(selectable);
@@ -421,7 +509,12 @@ export default function App() {
           : total.incomplete || summary?.cancelled || progress.errors
             ? " · 部分统计"
             : "";
-    return size(total.bytes) + label;
+    return (
+      size(total.bytes) +
+      (allItems.some((item) => item.kind === kind && staleIds.has(item.id))
+        ? " · 历史数据"
+        : label)
+    );
   };
 
   function showContextMenu(id: number, x: number, y: number) {
@@ -466,6 +559,10 @@ export default function App() {
 
   async function openDirectory(item: Candidate) {
     setContextMenu(null);
+    if (staleIds.has(item.id)) {
+      setMessage("历史目录需先刷新核实，再打开或清理。");
+      return;
+    }
     if (!native) {
       setMessage("请在桌面应用中打开本机目录。");
       return;
@@ -477,6 +574,42 @@ export default function App() {
       });
     } catch (error) {
       setMessage(String(error));
+    }
+  }
+  async function refreshItem(item: Candidate) {
+    if (!item.rule) {
+      setRefreshError("历史记录缺少识别规则，请重新扫描。");
+      return;
+    }
+    setRefreshError("");
+    setRefreshing(true);
+    setStaleIds((old) => new Set(old).add(item.id));
+    setSelected((old) => {
+      const next = new Set(old);
+      next.delete(item.id);
+      return next;
+    });
+    try {
+      const refreshed = await invoke<Candidate>("refresh_candidate", {
+        session: session.current,
+        id: item.id,
+        path: item.path,
+        kind: item.kind,
+        rule: item.rule,
+      });
+      setItems((old) => new Map(old).set(item.id, refreshed));
+      if (refreshed.measured && refreshed.complete)
+        setStaleIds((old) => {
+          const next = new Set(old);
+          next.delete(item.id);
+          return next;
+        });
+      else
+        setRefreshError("目录未能完整统计，不能清理；请查看读取错误后重试。");
+    } catch (error) {
+      setRefreshError(`刷新失败：${String(error)}`);
+    } finally {
+      setRefreshing(false);
     }
   }
   const rootList = globalMode
@@ -543,6 +676,9 @@ export default function App() {
     staged.current.clear();
     setItems(new Map());
     setSelected(new Set());
+    setStaleIds(new Set());
+    setHistoryDisplay(false);
+    setHistoryTime(null);
     setCleanResults(new Map());
     setPreflight(new Map());
     setCleanReport(false);
@@ -596,6 +732,7 @@ export default function App() {
         case "finished":
           flush();
           setSummary(event.data);
+          setHistoryTime(Date.now());
           setProgress(event.data.progress);
           setScanning(false);
           setCancelling(false);
@@ -908,25 +1045,29 @@ export default function App() {
               <div className="metric-value">
                 {size(scanning ? progress.bytes : remainingBytes)}
                 <small>
-                  {scanning
-                    ? "统计中"
-                    : summary
-                      ? failedItems.length
-                        ? "待复核"
-                        : summary.cancelled || progress.errors > 0
-                          ? "部分统计"
-                          : "已统计"
-                      : "等待扫描"}
+                  {historyDisplay
+                    ? "历史数据"
+                    : scanning
+                      ? "统计中"
+                      : summary
+                        ? failedItems.length
+                          ? "待复核"
+                          : summary.cancelled || progress.errors > 0
+                            ? "部分统计"
+                            : "已统计"
+                        : "等待扫描"}
                 </small>
               </div>
               <div className="metric-foot">
-                {summary?.cancelled
-                  ? "扫描已取消，以下为部分结果"
-                  : failedItems.length
-                    ? "清理未确认完成，请重新扫描核对大小"
-                    : progress.errors > 0
-                      ? "有目录无法读取，合计可能不完整"
-                      : "实际释放空间取决于磁盘与回收站"}
+                {historyDisplay
+                  ? "历史大小可能已变化，刷新目录后才能清理"
+                  : summary?.cancelled
+                    ? "扫描已取消，以下为部分结果"
+                    : failedItems.length
+                      ? "清理未确认完成，请重新扫描核对大小"
+                      : progress.errors > 0
+                        ? "有目录无法读取，合计可能不完整"
+                        : "实际释放空间取决于磁盘与回收站"}
               </div>
             </div>
             <div className="metric">
@@ -1313,6 +1454,16 @@ export default function App() {
                                   : "清理失败 · 查看详情"}
                               </em>
                             )}
+                            {staleIds.has(item.id) && (
+                              <em className="error-text">
+                                {historyDisplay
+                                  ? "历史数据 · 请先刷新"
+                                  : "待重新扫描"}
+                              </em>
+                            )}
+                            {historyDisplay && !staleIds.has(item.id) && (
+                              <em className="success-text">本次已刷新</em>
+                            )}
                           </span>
                         </button>
                         <span>
@@ -1407,9 +1558,11 @@ export default function App() {
                 <>
                   <span className="status-dot" />
                   <span>
-                    {summary
-                      ? `${summary.cancelled ? "部分扫描" : "本次扫描"} · ${progress.files.toLocaleString()} 个目标文件已统计 · 跳过 ${progress.skipped_links} 个链接`
-                      : "扫描不会修改你的任何文件"}
+                    {historyDisplay && historyTime
+                      ? `上次扫描 · ${new Date(historyTime).toLocaleString()} · 历史结果需刷新后清理`
+                      : summary
+                        ? `${summary.cancelled ? "部分扫描" : "本次扫描"} · ${progress.files.toLocaleString()} 个目标文件已统计 · 跳过 ${progress.skipped_links} 个链接`
+                        : "扫描不会修改你的任何文件"}
                   </span>
                   {issues.length > 0 && (
                     <button
@@ -1511,9 +1664,17 @@ export default function App() {
             {contextItem.project} / {directoryName(contextItem)}
           </div>
           <button
-            autoFocus={!cleaning && !removed.has(contextItem.id)}
+            autoFocus={
+              !cleaning &&
+              !removed.has(contextItem.id) &&
+              !staleIds.has(contextItem.id)
+            }
             role="menuitem"
-            disabled={cleaning || removed.has(contextItem.id)}
+            disabled={
+              cleaning ||
+              removed.has(contextItem.id) ||
+              staleIds.has(contextItem.id)
+            }
             onClick={() => openDirectory(contextItem)}
           >
             <FolderOpen size={15} />
@@ -1521,7 +1682,11 @@ export default function App() {
           </button>
           <button
             role="menuitem"
-            autoFocus={cleaning || removed.has(contextItem.id)}
+            autoFocus={
+              cleaning ||
+              removed.has(contextItem.id) ||
+              staleIds.has(contextItem.id)
+            }
             onClick={() => {
               setDetail(contextItem);
               setContextMenu(null);
@@ -1742,6 +1907,21 @@ export default function App() {
               </div>
             )}
             <div className="settings-section">
+              <h3>历史结果</h3>
+              <label className="history-setting">
+                <input
+                  type="checkbox"
+                  checked={historyEnabled}
+                  disabled={busy}
+                  onChange={(e) => setHistoryEnabled(e.target.checked)}
+                />
+                保存上次扫描结果
+              </label>
+              <p className="small muted">
+                默认关闭。启用后目录路径与统计结果保存在本机；历史数据需逐项刷新或重新扫描后才能清理。
+              </p>
+            </div>
+            <div className="settings-section">
               <h3>扫描并发</h3>
               <label className="worker-control">
                 <span>工作线程</span>
@@ -1817,6 +1997,23 @@ export default function App() {
               {detail.project} / {directoryName(detail)}
             </h3>
             <code className="detail-path">{displayPath(detail.path)}</code>
+            {staleIds.has(detail.id) && (
+              <p className="warning">
+                此目录的显示结果需要重新核实，刷新成功且统计完整后才可清理。
+              </p>
+            )}
+            {refreshError && (
+              <p role="alert" className="error-text small">
+                {refreshError}
+              </p>
+            )}
+            <button
+              className="button secondary refresh-button"
+              disabled={busy || removed.has(detail.id)}
+              onClick={() => refreshItem(detail)}
+            >
+              {refreshing ? "正在刷新…" : "刷新此目录"}
+            </button>
             <dl className="detail-list">
               <dt>逻辑大小</dt>
               <dd>{detail.measured ? size(detail.bytes) : "计算中"}</dd>
