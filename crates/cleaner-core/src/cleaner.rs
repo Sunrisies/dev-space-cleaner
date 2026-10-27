@@ -111,19 +111,15 @@ mod tests {
         fs::write(dir.path().join("Cargo.toml"), "[workspace]").unwrap();
         fs::create_dir_all(dir.path().join("target/debug")).unwrap();
         fs::write(dir.path().join("target/debug/item"), [0u8; 41]).unwrap();
-        let item =
-            crate::refresh_one(dir.path().join("target"), 45, Kind::Rust, "cargo-project").unwrap();
+        let target = dir.path().canonicalize().unwrap().join("target");
+        let item = crate::refresh_one(target.clone(), 45, Kind::Rust, "cargo-project").unwrap();
         assert_eq!(
             (item.id, item.bytes, item.files, item.complete),
             (45, 41, 1, true)
         );
         assert!(validate(&item).is_ok());
-        assert!(
-            crate::refresh_one(dir.path().join("target"), 45, Kind::Java, "cargo-project").is_err()
-        );
+        assert!(crate::refresh_one(target.clone(), 45, Kind::Java, "cargo-project").is_err());
         fs::remove_file(dir.path().join("Cargo.toml")).unwrap();
-        assert!(
-            crate::refresh_one(dir.path().join("target"), 45, Kind::Rust, "cargo-project").is_err()
-        );
+        assert!(crate::refresh_one(target, 45, Kind::Rust, "cargo-project").is_err());
     }
 }

@@ -20,7 +20,7 @@ jobs:
         with:
           name: layout-checks
           path: |
-            docs/screenshots/desktop-fixed.png
+            docs/screenshots/*.png
             test-results/
   desktop:
     strategy:
@@ -50,10 +50,23 @@ jobs:
       - run: cargo test -p huanj-core -- --nocapture
       - run: cargo test -p huanj --lib
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: npm run tauri build -- --no-bundle --target ${{ matrix.target }}
+      - name: Build Windows executable
+        if: runner.os == 'Windows'
+        run: npm run tauri build -- --no-bundle --target ${{ matrix.target }}
+      - name: Build macOS application bundle
+        if: runner.os == 'macOS'
+        run: npm run tauri build -- --bundles app --target ${{ matrix.target }}
+      - name: Archive macOS application preserving executable permissions
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          apps=(target/${{ matrix.target }}/release/bundle/macos/*.app)
+          test -d "${apps[0]}"
+          ditto -c -k --sequesterRsrc --keepParent "${apps[0]}" "target/${{ matrix.target }}/release/huanj-macos-${{ matrix.target }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: huanj-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/huanj.exe
-            target/${{ matrix.target }}/release/huanj
+            target/${{ matrix.target }}/release/huanj-macos-${{ matrix.target }}.zip

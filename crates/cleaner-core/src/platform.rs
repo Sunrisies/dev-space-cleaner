@@ -72,13 +72,14 @@ pub fn drives() -> Vec<Drive> {
         }];
         if let Ok(entries) = fs::read_dir("/Volumes") {
             for entry in entries.flatten() {
-                if let Ok(meta) = fs::symlink_metadata(entry.path()) {
-                    if meta.is_dir() && !is_link(&meta) {
-                        result.push(Drive {
-                            label: entry.file_name().to_string_lossy().into_owned(),
-                            path: entry.path(),
-                        });
-                    }
+                if let Ok(meta) = fs::symlink_metadata(entry.path())
+                    && meta.is_dir()
+                    && !is_link(&meta)
+                {
+                    result.push(Drive {
+                        label: entry.file_name().to_string_lossy().into_owned(),
+                        path: entry.path(),
+                    });
                 }
             }
         }

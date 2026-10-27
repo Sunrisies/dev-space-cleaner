@@ -23,7 +23,7 @@
 
 桌面设置存放在系统应用配置目录中的 `scan-settings.json`，与 WebView 缓存分开，并沿用应用标识跨版本保存。离线或暂未挂载的位置不会被自动删除；扫描时仍检查路径可访问性。保存失败、内容损坏会明确提示，不在启动时自动覆盖原文件。
 
-## 0.2.0 项目工具链扩展
+## 0.3.0 扫描与清理
 
 类型选择位于“扫描设置”，支持搜索、批量选择当前搜索结果及保存。左侧分类列表可独立滚动，按每类显示数量和逻辑大小。结果筛选采用下拉列表，每行显示实际目录名，右击仍可打开目录。
 
@@ -86,6 +86,8 @@ npm run tauri build -- --no-bundle
 产物位于 Cargo 配置的 target 目录下 `release/huanj.exe`（Windows）或 `release/huanj`（macOS）。如果没有全局 target 配置，则在项目的 `target/release` 中。
 
 生成安装包使用 `npm run tauri build`。Windows 支持 MSI/NSIS；Mac 的应用打包和签名需要在 macOS 上完成。项目没有包含发布签名证书。
+
+macOS 可在对应架构的 Mac 上运行 `npm run tauri build -- --bundles app` 生成 `.app`。GitHub Actions 为 Apple Silicon 与 Intel 分别生成保留可执行权限的 `.app` ZIP 构建产物，供测试使用。仓库目前没有 Apple Developer ID 签名和公证配置，未签名测试包可能被系统阻止；正式向其他用户分发需完成签名和公证。
 
 应用显示名称为“缓境 Huanj”，应用标识仍是 `dev.huanj.cleaner`，原有已保存扫描设置继续沿用。
 

@@ -23,4 +23,4 @@
 
 第 5 项：清理后在本机应用配置目录保存最近 1000 项时间、路径、逻辑大小、类别及成功／失败信息；记录损坏或写入失败时保留原文件并提示，不影响已发生的清理结果。界面提供搜索和打开系统回收站入口；Mac 打开当前用户的 Finder 废纸篓，实机效果待验证。
 
-第 6 项的前期诊断：首次 GitHub Actions 中 Windows 和布局任务成功，两个 Mac 任务在 clippy 阶段失败。Apple Silicon 日志显示 `crates/cleaner-core/src/platform.rs` 的 macOS 分支触发 `clippy::collapsible_if`；详细修复及两架构重验仍未进行。
+第 6 项：首次 GitHub Actions 中 Windows 和布局任务成功，两个 Mac 任务在 clippy 阶段失败。已修复 macOS 磁盘枚举分支的 `clippy::collapsible_if`，增加 Apple Silicon / Intel 的 `.app` 打包与保留可执行权限的 ZIP 构建产物。两架构 CI 重验和真实 Mac 界面／回收站验证状态分别记录；未提供签名证书与 Apple 公证凭据，不宣称已正式分发。
