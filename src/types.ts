@@ -54,6 +54,7 @@ export type ScanEvent =
   | { type: "finished"; data: Summary };
 export type Envelope = { session: string; event: ScanEvent };
 export type CleanResult = { id: number; success: boolean; message: string };
+export type PreflightResult = { id: number; valid: boolean; message: string };
 export const emptyProgress: Progress = {
   directories: 0,
   files: 0,

@@ -70,10 +70,11 @@ async function mockDesktop(
   pending = false,
   failClean = false,
   extra: Candidate[] = [],
+  preflightFail = false,
 ) {
   await page.setViewportSize({ width: 1080, height: 650 });
   await page.addInitScript(
-    ({ fixtures, pending, failClean }) => {
+    ({ fixtures, pending, failClean, preflightFail }) => {
       // Mock only native IPC. The real Channel, scan reducer, virtual list and menus run unchanged.
       const host = window as any;
       host.isTauri = true;
@@ -96,6 +97,15 @@ async function mockDesktop(
             host.opened.push(args);
             return;
           }
+          if (command === "preview_selected")
+            return args.ids.map((id: number) => ({
+              id,
+              valid: !(preflightFail && id === 1),
+              message:
+                preflightFail && id === 1
+                  ? "项目识别依据已变化，请重新扫描"
+                  : "识别依据与目录身份校验通过",
+            }));
           if (command === "clean_selected")
             return args.ids.map((id: number) => ({
               id,
@@ -151,12 +161,28 @@ async function mockDesktop(
         },
       };
     },
-    { fixtures: [...fixtures, ...extra], pending, failClean },
+    { fixtures: [...fixtures, ...extra], pending, failClean, preflightFail },
   );
   await page.goto("/");
   await page.getByRole("button", { name: "开始扫描", exact: true }).click();
   await expect(page.locator('[data-candidate-id="1"]')).toBeVisible();
 }
+
+test("changed recognition evidence blocks confirmation before cleanup", async ({
+  page,
+}) => {
+  await mockDesktop(page, false, false, [], true);
+  await page.locator('[data-candidate-id="1"]').getByRole("checkbox").check();
+  await page.getByRole("button", { name: "清理所选目录" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByText("项目识别依据已变化，请重新扫描"),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "确认移入回收站" }),
+  ).toBeDisabled();
+  await expect(dialog.getByText(/构建产物会被移除/)).toBeVisible();
+});
 
 test("type totals match rows, ignore search filters, and right click opens the scanned ID", async ({
   page,

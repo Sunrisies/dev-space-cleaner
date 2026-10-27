@@ -2,7 +2,7 @@ mod directory;
 mod preferences;
 use huanj_core::{
     Candidate, CleanResult, Drive, Kind, ScanEvent, ScanOptions, clean, drives, scan,
-    scan_global_caches,
+    scan_global_caches, validate_candidate,
 };
 use preferences::PreferencesLock;
 use serde::Serialize;
@@ -32,6 +32,81 @@ struct Session {
 }
 #[derive(Default)]
 struct AppState(Arc<Mutex<Session>>);
+
+fn take_selection(
+    current: &mut Session,
+    session: &str,
+    ids: Vec<u64>,
+) -> Result<Vec<Candidate>, String> {
+    if current.busy {
+        return Err("当前任务尚未结束".into());
+    }
+    if current.id != session {
+        return Err("扫描会话已过期，请重新扫描".into());
+    }
+    if ids.is_empty() {
+        return Err("请先选择目录".into());
+    }
+    let mut seen = HashSet::new();
+    let mut items = Vec::new();
+    for id in ids {
+        if !seen.insert(id) {
+            continue;
+        }
+        let item = current
+            .candidates
+            .get(&id)
+            .ok_or("候选目录不存在，请重新扫描")?;
+        if items.iter().any(|other: &Candidate| {
+            item.path.starts_with(&other.path) || other.path.starts_with(&item.path)
+        }) {
+            return Err("所选目录范围重叠，请重新扫描".into());
+        }
+        items.push(item.clone());
+    }
+    current.busy = true;
+    Ok(items)
+}
+
+#[derive(Serialize)]
+struct PreflightResult {
+    id: u64,
+    valid: bool,
+    message: String,
+}
+
+#[tauri::command]
+async fn preview_selected(
+    session: String,
+    ids: Vec<u64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<PreflightResult>, String> {
+    let shared = state.0.clone();
+    let items = {
+        let mut current = shared.lock().map_err(|e| e.to_string())?;
+        take_selection(&mut current, &session, ids)?
+    };
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        items
+            .iter()
+            .map(|item| match validate_candidate(item) {
+                Ok(()) => PreflightResult {
+                    id: item.id,
+                    valid: true,
+                    message: "识别依据与目录身份校验通过".into(),
+                },
+                Err(message) => PreflightResult {
+                    id: item.id,
+                    valid: false,
+                    message,
+                },
+            })
+            .collect::<Vec<_>>()
+    })
+    .await;
+    shared.lock().map_err(|e| e.to_string())?.busy = false;
+    result.map_err(|e| format!("清理前检查失败：{e}"))
+}
 
 #[tauri::command]
 fn list_drives() -> Vec<Drive> {
@@ -187,34 +262,7 @@ async fn clean_selected(
     let shared = state.0.clone();
     let items = {
         let mut current = shared.lock().map_err(|e| e.to_string())?;
-        if current.busy {
-            return Err("当前任务尚未结束".into());
-        }
-        if current.id != session {
-            return Err("扫描会话已过期，请重新扫描".into());
-        }
-        if ids.is_empty() {
-            return Err("请先选择目录".into());
-        }
-        let mut seen = HashSet::new();
-        let mut items = Vec::new();
-        for id in ids {
-            if !seen.insert(id) {
-                continue;
-            }
-            let item = current
-                .candidates
-                .get(&id)
-                .ok_or("候选目录不存在，请重新扫描")?;
-            if items.iter().any(|other: &Candidate| {
-                item.path.starts_with(&other.path) || other.path.starts_with(&item.path)
-            }) {
-                return Err("所选目录范围重叠，请重新扫描".into());
-            }
-            items.push(item.clone());
-        }
-        current.busy = true;
-        items
+        take_selection(&mut current, &session, ids)?
     };
     let result =
         tauri::async_runtime::spawn_blocking(move || items.iter().map(clean).collect::<Vec<_>>())
@@ -273,6 +321,7 @@ pub fn run() {
             list_global_caches,
             start_scan,
             cancel_scan,
+            preview_selected,
             clean_selected,
             open_candidate_directory,
             preferences::load_preferences,
@@ -280,4 +329,48 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("无法启动缓境");
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use std::fs;
+    #[test]
+    fn preflight_reserves_session_and_rejects_unknown_or_overlapping_items() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("package.json"), "{}").unwrap();
+        fs::create_dir(temp.path().join("node_modules")).unwrap();
+        let found = Mutex::new(None);
+        scan(
+            ScanOptions {
+                roots: vec![temp.path().into()],
+                kinds: vec![Kind::Node],
+                workers: 1,
+            },
+            Arc::new(AtomicBool::new(false)),
+            |event| {
+                if let ScanEvent::Sized(item) = event {
+                    *found.lock().unwrap() = Some(item);
+                }
+            },
+        );
+        let item = found.into_inner().unwrap().unwrap();
+        let mut nested = item.clone();
+        nested.id = item.id + 1;
+        nested.path = item.path.join("nested");
+        let mut state = Session {
+            id: "current".into(),
+            candidates: [(item.id, item.clone()), (nested.id, nested.clone())].into(),
+            ..Default::default()
+        };
+        assert!(take_selection(&mut state, "wrong", vec![item.id]).is_err());
+        assert!(take_selection(&mut state, "current", vec![999]).is_err());
+        assert!(take_selection(&mut state, "current", vec![item.id, nested.id]).is_err());
+        let selected = take_selection(&mut state, "current", vec![item.id, item.id]).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert!(take_selection(&mut state, "current", vec![item.id]).is_err());
+        assert!(validate_candidate(&selected[0]).is_ok());
+        fs::remove_file(temp.path().join("package.json")).unwrap();
+        assert!(validate_candidate(&selected[0]).is_err());
+    }
 }

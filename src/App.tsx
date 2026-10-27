@@ -11,6 +11,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ToolchainPicker } from "./ToolchainPicker";
 import { groupProjects, volumeOf } from "./project-groups";
+import { cleanupImpact } from "./cleanup-impact";
 import { summarize } from "./summary";
 import {
   loadPreferences,
@@ -60,6 +61,7 @@ import {
   type Envelope,
   type Kind,
   type Progress,
+  type PreflightResult,
   type Summary,
 } from "./types";
 
@@ -135,6 +137,10 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [preflight, setPreflight] = useState<Map<number, PreflightResult>>(
+    new Map(),
+  );
   const [summary, setSummary] = useState<Summary | null>(null);
   const [currentPath, setCurrentPath] = useState("");
   const [rootStatuses, setRootStatuses] = useState<Record<string, RootStatus>>(
@@ -173,7 +179,8 @@ export default function App() {
   );
   const session = useRef("");
   const staged = useRef(new Map<number, Candidate>());
-  const busy = scanning || cleaning || !preferencesReady || savingPreferences;
+  const busy =
+    scanning || cleaning || checking || !preferencesReady || savingPreferences;
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentPreferences = useMemo<Preferences>(
     () => ({
@@ -537,6 +544,7 @@ export default function App() {
     setItems(new Map());
     setSelected(new Set());
     setCleanResults(new Map());
+    setPreflight(new Map());
     setCleanReport(false);
     setProgress(emptyProgress);
     setSummary(null);
@@ -616,6 +624,22 @@ export default function App() {
     } catch (error) {
       setMessage(String(error));
       setCancelling(false);
+    }
+  }
+  async function prepareCleaning() {
+    setChecking(true);
+    setMessage("");
+    try {
+      const results = await invoke<PreflightResult[]>("preview_selected", {
+        session: session.current,
+        ids: chosen.map((i) => i.id),
+      });
+      setPreflight(new Map(results.map((result) => [result.id, result])));
+      setConfirm(true);
+    } catch (error) {
+      setMessage(`清理前检查失败：${String(error)}`);
+    } finally {
+      setChecking(false);
     }
   }
   async function cleanSelected() {
@@ -1436,15 +1460,19 @@ export default function App() {
           <button
             className="button clean-button"
             disabled={busy || !chosen.length}
-            onClick={() => setConfirm(true)}
+            onClick={prepareCleaning}
           >
-            {cleaning ? (
+            {cleaning || checking ? (
               <LoaderCircle size={16} className="spin" />
             ) : (
               <Trash2 size={16} />
             )}
-            {cleaning ? "正在移入回收站…" : "清理所选目录"}
-            {!cleaning && <ChevronRight size={15} />}
+            {cleaning
+              ? "正在移入回收站…"
+              : checking
+                ? "正在检查目录…"
+                : "清理所选目录"}
+            {!cleaning && !checking && <ChevronRight size={15} />}
           </button>
         </footer>
       </main>
@@ -1864,7 +1892,14 @@ export default function App() {
                   <Folder size={14} />
                   <span title={displayPath(i.path)}>{displayPath(i.path)}</span>
                   <strong>{size(i.bytes)}</strong>
-                  {i.rule?.startsWith("global:") && <small>{i.evidence}</small>}
+                  <small>{cleanupImpact(i)}</small>
+                  <small
+                    className={
+                      preflight.get(i.id)?.valid ? "success-text" : "error-text"
+                    }
+                  >
+                    {preflight.get(i.id)?.message ?? "未完成清理前检查"}
+                  </small>
                 </div>
               ))}
             </div>
@@ -1879,7 +1914,11 @@ export default function App() {
             >
               返回检查
             </button>
-            <button className="button primary" onClick={cleanSelected}>
+            <button
+              className="button primary"
+              disabled={chosen.some((i) => !preflight.get(i.id)?.valid)}
+              onClick={cleanSelected}
+            >
               <Trash2 size={15} />
               确认移入回收站
             </button>

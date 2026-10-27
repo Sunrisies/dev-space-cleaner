@@ -91,6 +91,12 @@ test("global caches are opt-in, persist separately and explain cleanup impact", 
           });
           return;
         }
+        if (command === "preview_selected")
+          return args.ids.map((id: number) => ({
+            id,
+            valid: true,
+            message: "识别依据与目录身份校验通过",
+          }));
         if (command === "clean_selected") {
           host.cleaned = args.ids;
           return args.ids.map((id: number) => ({
