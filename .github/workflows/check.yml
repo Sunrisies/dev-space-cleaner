@@ -3,6 +3,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      macos_recycle_test:
+        description: '尝试使用 Finder 回收临时测试目录（可能需要交互授权）'
+        type: boolean
+        default: false
 jobs:
   layout:
     runs-on: ubuntu-latest
@@ -63,6 +68,8 @@ jobs:
           set -euo pipefail
           apps=(target/${{ matrix.target }}/release/bundle/macos/*.app)
           test -d "${apps[0]}"
+          /usr/libexec/PlistBuddy -c 'Print :NSAppleEventsUsageDescription' "${apps[0]}/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :NSRemovableVolumesUsageDescription' "${apps[0]}/Contents/Info.plist"
           ditto -c -k --sequesterRsrc --keepParent "${apps[0]}" "target/${{ matrix.target }}/release/huanj-macos-${{ matrix.target }}.zip"
       - uses: actions/upload-artifact@v4
         with:
@@ -70,3 +77,7 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/huanj.exe
             target/${{ matrix.target }}/release/huanj-macos-${{ matrix.target }}.zip
+      - name: Optional macOS Finder recycle test
+        if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.macos_recycle_test
+        timeout-minutes: 2
+        run: cargo test -p huanj-core recycles_generated_macos_fixture -- --ignored --nocapture

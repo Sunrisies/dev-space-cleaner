@@ -122,4 +122,37 @@ mod tests {
         fs::remove_file(dir.path().join("Cargo.toml")).unwrap();
         assert!(crate::refresh_one(target, 45, Kind::Rust, "cargo-project").is_err());
     }
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "explicit opt-in: moves only a generated test directory into the macOS Trash; Finder authorization may be required"]
+    fn recycles_generated_macos_fixture() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::write(root.join("package.json"), "{}").unwrap();
+        fs::create_dir_all(root.join("node_modules/测试目录")).unwrap();
+        fs::write(
+            root.join("node_modules/测试目录/generated.txt"),
+            b"generated test fixture",
+        )
+        .unwrap();
+        let found = Mutex::new(None);
+        scan(
+            ScanOptions {
+                roots: vec![root.clone()],
+                kinds: vec![Kind::Node],
+                workers: 1,
+            },
+            Arc::new(AtomicBool::new(false)),
+            |event| {
+                if let ScanEvent::Sized(item) = event {
+                    *found.lock().unwrap() = Some(item);
+                }
+            },
+        );
+        let item = found.into_inner().unwrap().unwrap();
+        assert!(item.complete);
+        let result = clean(&item);
+        assert!(result.success, "{}", result.message);
+        assert!(!root.join("node_modules").exists());
+    }
 }

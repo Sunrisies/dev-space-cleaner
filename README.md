@@ -89,6 +89,10 @@ npm run tauri build -- --no-bundle
 
 macOS 可在对应架构的 Mac 上运行 `npm run tauri build -- --bundles app` 生成 `.app`。GitHub Actions 为 Apple Silicon 与 Intel 分别生成保留可执行权限的 `.app` ZIP 构建产物，供测试使用。仓库目前没有 Apple Developer ID 签名和公证配置，未签名测试包可能被系统阻止；正式向其他用户分发需完成签名和公证。
 
+macOS 首次访问桌面、文稿、下载、外置或网络卷时，系统可能询问对应文件访问权限；部分位置还可能要求用户在系统设置中授予更高访问权限。清理使用 Finder 移入废纸篓，系统可能要求允许自动化控制 Finder；拒绝或权限不足时会显示错误。可在 Mac 上运行 `cargo test -p huanj-core recycles_generated_macos_fixture -- --ignored --nocapture`，只会将测试新建的目录移入真实废纸篓。此检查需要有可交互的 Finder 会话，不由默认 CI 自动执行。
+
+GitHub Actions 手动运行时也可选择 `macos_recycle_test` 尝试该测试；托管运行器可能没有 Finder 交互授权，失败或超时需要在真实 Mac 上进一步验证。
+
 应用显示名称为“缓境 Huanj”，应用标识仍是 `dev.huanj.cleaner`，原有已保存扫描设置继续沿用。
 
 0.1.5 在左侧按 Node.js、Rust、Python 展示剩余目录数量及逻辑体积汇总，结果行保留单项大小。搜索和筛选不改变语言汇总，成功回收后扣除对应项目；统计中、不完整及清理失败后待复核的数值会标记状态。
