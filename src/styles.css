@@ -1229,8 +1229,42 @@ p {
 }
 .scope-options {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+.global-cache-list {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.global-cache-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.global-cache-option:last-child {
+  border-bottom: 0;
+}
+.global-cache-option input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.global-cache-option span {
+  min-width: 0;
+}
+.global-cache-option strong,
+.global-cache-option small {
+  display: block;
+}
+.global-cache-option small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 .scope-options > button {
   border: 1px solid var(--line);
@@ -1394,6 +1428,14 @@ p {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
   font-size: 10px;
+}
+.confirm-list > div:has(small) {
+  flex-wrap: wrap;
+}
+.confirm-list > div > small {
+  flex-basis: 100%;
+  padding-left: 23px;
+  color: var(--muted);
 }
 .confirm-list span {
   flex: 1;

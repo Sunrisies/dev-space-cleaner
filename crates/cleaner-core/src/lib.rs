@@ -1,4 +1,5 @@
 mod cleaner;
+pub mod global_cache;
 mod platform;
 mod rules;
 mod scanner;
@@ -8,4 +9,6 @@ mod windows_trash;
 pub use cleaner::{CleanResult, clean};
 pub use platform::{Drive, drives, is_link};
 pub use rules::Kind;
-pub use scanner::{Candidate, Progress, ScanEvent, ScanOptions, ScanSummary, scan};
+pub use scanner::{
+    Candidate, Progress, ScanEvent, ScanOptions, ScanSummary, scan, scan_global_caches,
+};

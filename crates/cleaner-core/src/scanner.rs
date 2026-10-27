@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -30,6 +30,129 @@ pub struct Candidate {
     pub modified: Option<u64>,
     #[serde(skip)]
     pub(crate) created: Option<SystemTime>,
+}
+
+/// Scan a separately selected set of global caches. Never mixes project candidates.
+pub fn scan_global_caches(
+    caches: Vec<crate::global_cache::GlobalCache>,
+    workers: usize,
+    cancel: Arc<AtomicBool>,
+    sink: impl Fn(ScanEvent) + Send + Sync,
+) -> ScanSummary {
+    let start = Instant::now();
+    let engine = Engine {
+        cancel: &cancel,
+        counters: Counters::default(),
+        last_tick: Mutex::new(Instant::now()),
+        sink: &sink,
+        kinds: &[],
+    };
+    let mut unique = Vec::new();
+    for entry in caches {
+        if !entry.path.is_absolute()
+            || entry
+                .path
+                .ancestors()
+                .any(|p| !fs::symlink_metadata(p).is_ok_and(|m| !is_link(&m) && m.is_dir()))
+        {
+            engine.issue(&entry.path, "缓存目录或上级目录不可访问，或包含链接");
+            continue;
+        }
+        let Ok(path) = fs::canonicalize(&entry.path) else {
+            engine.issue(&entry.path, "无法解析缓存目录");
+            continue;
+        };
+        if unique.iter().any(
+            |(_, existing): &(crate::global_cache::GlobalCache, PathBuf)| {
+                path.starts_with(existing) || existing.starts_with(&path)
+            },
+        ) {
+            engine.issue(&path, "缓存范围重叠，已跳过");
+            continue;
+        }
+        unique.push((entry, path));
+    }
+    let index = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..workers.clamp(1, 16).min(unique.len()) {
+            let engine = &engine;
+            let unique = &unique;
+            let index = &index;
+            let sink = &sink;
+            scope.spawn(move || {
+                loop {
+                    if engine.cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let Some((entry, path)) = unique.get(index.fetch_add(1, Ordering::Relaxed))
+                    else {
+                        break;
+                    };
+                    let Some(root) = path.parent() else {
+                        engine.issue(path, "缓存目录没有上级目录");
+                        continue;
+                    };
+                    let meta = match fs::symlink_metadata(path) {
+                        Ok(m) if m.is_dir() && !is_link(&m) => m,
+                        _ => {
+                            engine.issue(path, "缓存目录已变化，请重新扫描");
+                            continue;
+                        }
+                    };
+                    let kind = match entry.tool.as_str() {
+                        "npm" | "pnpm" => Kind::Node,
+                        "pip" => Kind::Python,
+                        "Gradle" => Kind::Java,
+                        "Go" => Kind::Go,
+                        _ => {
+                            engine.issue(path, "未知缓存类型");
+                            continue;
+                        }
+                    };
+                    let id = engine.counters.found.fetch_add(1, Ordering::Relaxed) + 1;
+                    engine.counters.dirs.fetch_add(1, Ordering::Relaxed);
+                    let mut item = Candidate {
+                        id,
+                        path: path.clone(),
+                        root: root.into(),
+                        project: entry.tool.clone(),
+                        kind,
+                        rule: format!("global:{}", entry.id),
+                        evidence: format!("{}；{}", entry.category, entry.impact),
+                        bytes: 0,
+                        files: 0,
+                        complete: true,
+                        measured: false,
+                        skipped_links: 0,
+                        errors: 0,
+                        modified: meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs()),
+                        created: meta.created().ok(),
+                    };
+                    sink(ScanEvent::RootStarted { path: path.clone() });
+                    sink(ScanEvent::Found(item.clone()));
+                    engine.measure(&mut item);
+                    sink(ScanEvent::Sized(item.clone()));
+                    sink(ScanEvent::RootFinished {
+                        path: path.clone(),
+                        errors: item.errors,
+                        cancelled: engine.cancel.load(Ordering::Relaxed),
+                    });
+                }
+            });
+        }
+    });
+    let summary = ScanSummary {
+        progress: engine.counters.snapshot(),
+        cancelled: cancel.load(Ordering::Relaxed),
+        elapsed_ms: start.elapsed().as_millis() as u64,
+        roots: unique.into_iter().map(|(_, path)| path).collect(),
+    };
+    sink(ScanEvent::Finished(summary.clone()));
+    summary
 }
 
 #[derive(Debug, Clone)]

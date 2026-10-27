@@ -22,6 +22,10 @@ pub struct Preferences {
     roots: Vec<String>,
     kinds: Vec<String>,
     workers: usize,
+    #[serde(default)]
+    global_mode: bool,
+    #[serde(default)]
+    global_ids: Vec<String>,
 }
 
 impl Preferences {
@@ -32,6 +36,18 @@ impl Preferences {
         if !(1..=16).contains(&self.workers) {
             return Err("工作线程数应为 1–16".into());
         }
+        if self.global_ids.len() > 100
+            || self.global_ids.iter().any(|id| {
+                id.is_empty()
+                    || id.len() > 128
+                    || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            })
+        {
+            return Err("全局缓存选择无效".into());
+        }
+        if self.global_mode && self.global_ids.is_empty() {
+            return Err("请至少选择一个全局缓存".into());
+        }
         if self.kinds.is_empty()
             || self
                 .kinds
@@ -40,7 +56,7 @@ impl Preferences {
         {
             return Err("请至少选择一种有效的扫描类型".into());
         }
-        if self.mode == Scope::Custom && self.roots.is_empty() {
+        if self.mode == Scope::Custom && self.roots.is_empty() && !self.global_mode {
             return Err("请先添加自定义扫描目录".into());
         }
         if self
@@ -147,6 +163,8 @@ mod tests {
             roots: vec![root.join("暂未挂载的项目").to_string_lossy().into_owned()],
             kinds: vec!["node".into(), "python".into()],
             workers: 8,
+            global_mode: false,
+            global_ids: vec![],
         }
     }
     #[test]
@@ -196,7 +214,26 @@ mod tests {
         assert_eq!(load(&path).unwrap(), Some(expanded.clone()));
         expanded.kinds.push("unknown".into());
         assert!(save(&path, &expanded).is_err());
-        assert_eq!(load(&path).unwrap().unwrap().kinds.len(), 16);
+        assert_eq!(load(&path).unwrap().unwrap().kinds.len(), 17);
+    }
+    #[test]
+    fn old_settings_default_to_project_mode_and_global_selection_round_trips() {
+        let old: Preferences = serde_json::from_str(
+            r#"{"version":1,"mode":"all","roots":[],"kinds":["node"],"workers":8}"#,
+        )
+        .unwrap();
+        assert!(!old.global_mode);
+        assert!(old.global_ids.is_empty());
+        assert!(old.validate().is_ok());
+        let mut global = old;
+        global.global_mode = true;
+        global.global_ids = vec!["go-build".into(), "npm-cache".into()];
+        assert_eq!(
+            serde_json::from_str::<Preferences>(&serde_json::to_string(&global).unwrap()).unwrap(),
+            global
+        );
+        global.global_ids = vec!["../untrusted/path".into()];
+        assert!(global.validate().is_err());
     }
     #[test]
     fn corrupt_settings_are_reported_without_modifying_file() {

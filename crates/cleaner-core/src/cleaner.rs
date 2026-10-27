@@ -32,7 +32,12 @@ pub fn validate(item: &Candidate) -> Result<(), String> {
     if actual != item.path {
         return Err("目录实际路径已变化".into());
     }
-    if !identify(&item.path).is_some_and(|r| r.kind == item.kind && r.rule == item.rule) {
+    let valid_rule = if let Some(id) = item.rule.strip_prefix("global:") {
+        crate::global_cache::validates(id, &item.path)
+    } else {
+        identify(&item.path).is_some_and(|r| r.kind == item.kind && r.rule == item.rule)
+    };
+    if !valid_rule {
         return Err("项目识别依据已变化，请重新扫描".into());
     }
     Ok(())

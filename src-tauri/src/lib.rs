@@ -2,6 +2,7 @@ mod directory;
 mod preferences;
 use huanj_core::{
     Candidate, CleanResult, Drive, Kind, ScanEvent, ScanOptions, clean, drives, scan,
+    scan_global_caches,
 };
 use preferences::PreferencesLock;
 use serde::Serialize;
@@ -38,10 +39,18 @@ fn list_drives() -> Vec<Drive> {
 }
 
 #[tauri::command]
+async fn list_global_caches() -> Result<Vec<huanj_core::global_cache::GlobalCache>, String> {
+    tauri::async_runtime::spawn_blocking(huanj_core::global_cache::discover_system)
+        .await
+        .map_err(|e| format!("无法发现全局缓存：{e}"))
+}
+
+#[tauri::command]
 fn start_scan(
     session: String,
     roots: Option<Vec<String>>,
     kinds: Vec<String>,
+    global_ids: Option<Vec<String>>,
     workers: usize,
     on_event: Channel<Envelope>,
     state: State<'_, AppState>,
@@ -50,9 +59,25 @@ fn start_scan(
         .iter()
         .map(|k| Kind::from_id(k).ok_or_else(|| format!("未知扫描类型：{k}")))
         .collect::<Result<_, _>>()?;
-    if kinds.is_empty() {
+    if kinds.is_empty() && global_ids.is_none() {
         return Err("至少选择一种目录类型".into());
     }
+    let global = if let Some(ids) = global_ids {
+        let requested: HashSet<_> = ids.into_iter().collect();
+        if requested.is_empty() {
+            return Err("请先选择全局缓存".into());
+        }
+        let found: Vec<_> = huanj_core::global_cache::discover_system()
+            .into_iter()
+            .filter(|c| requested.contains(&c.id))
+            .collect();
+        if found.len() != requested.len() {
+            return Err("所选缓存已变化或不可访问，请重新检查全局缓存".into());
+        }
+        Some(found)
+    } else {
+        None
+    };
     if session.is_empty() {
         return Err("缺少扫描会话标识".into());
     }
@@ -75,35 +100,40 @@ fn start_scan(
             let roots: Vec<PathBuf> = roots
                 .map(|r| r.into_iter().map(PathBuf::from).collect())
                 .unwrap_or_else(|| drives().into_iter().map(|d| d.path).collect());
-            scan(
-                ScanOptions {
-                    roots,
-                    kinds,
-                    workers: workers.clamp(1, 16),
-                },
-                cancel.clone(),
-                |event| {
-                    // Register paths before displaying them. Sizing replaces the
-                    // snapshot; cleaning still requires a complete measurement.
-                    if let ScanEvent::Found(ref item) | ScanEvent::Sized(ref item) = event {
-                        let mut current = shared.lock().unwrap();
-                        if current.id == session {
-                            current.candidates.insert(item.id, item.clone());
-                        }
+            let sink = |event| {
+                // Register paths before displaying them. Sizing replaces the
+                // snapshot; cleaning still requires a complete measurement.
+                if let ScanEvent::Found(ref item) | ScanEvent::Sized(ref item) = event {
+                    let mut current = shared.lock().unwrap();
+                    if current.id == session {
+                        current.candidates.insert(item.id, item.clone());
                     }
-                    // Finished is emitted below only after clearing busy, preventing an immediate restart race.
-                    if !matches!(event, ScanEvent::Finished(_))
-                        && on_event
-                            .send(Envelope {
-                                session: session.clone(),
-                                event,
-                            })
-                            .is_err()
-                    {
-                        cancel.store(true, Ordering::Relaxed);
-                    }
-                },
-            )
+                }
+                // Finished is emitted below only after clearing busy, preventing an immediate restart race.
+                if !matches!(event, ScanEvent::Finished(_))
+                    && on_event
+                        .send(Envelope {
+                            session: session.clone(),
+                            event,
+                        })
+                        .is_err()
+                {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            };
+            if let Some(global) = global {
+                scan_global_caches(global, workers, cancel.clone(), sink)
+            } else {
+                scan(
+                    ScanOptions {
+                        roots,
+                        kinds,
+                        workers: workers.clamp(1, 16),
+                    },
+                    cancel.clone(),
+                    sink,
+                )
+            }
         }));
         if let Ok(mut current) = shared.lock() {
             current.busy = false;
@@ -240,6 +270,7 @@ pub fn run() {
         .manage(PreferencesLock::default())
         .invoke_handler(tauri::generate_handler![
             list_drives,
+            list_global_caches,
             start_scan,
             cancel_scan,
             clean_selected,

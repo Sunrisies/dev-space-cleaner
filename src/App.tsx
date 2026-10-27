@@ -48,12 +48,14 @@ import {
   displayPath,
   directoryName,
   kinds,
+  projectKinds,
   emptyProgress,
   kindInfo,
   size,
   type Candidate,
   type CleanResult,
   type Drive,
+  type GlobalCache,
   type Envelope,
   type Kind,
   type Progress,
@@ -107,7 +109,13 @@ export default function App() {
   const [drives, setDrives] = useState<Drive[]>([]);
   const [mode, setMode] = useState<"all" | "custom">("all");
   const [customRoots, setCustomRoots] = useState<string[]>([]);
-  const [enabledKinds, setEnabledKinds] = useState<Set<Kind>>(new Set(kinds));
+  const [globalMode, setGlobalMode] = useState(false);
+  const [globalCaches, setGlobalCaches] = useState<GlobalCache[]>([]);
+  const [globalIds, setGlobalIds] = useState<Set<string>>(new Set());
+  const [globalLoading, setGlobalLoading] = useState(false);
+  const [enabledKinds, setEnabledKinds] = useState<Set<Kind>>(
+    new Set(projectKinds),
+  );
   const [scanKinds, setScanKinds] = useState<ReadonlySet<Kind> | null>(null);
   const [filter, setFilter] = useState<Kind | "all">("all");
   const [query, setQuery] = useState("");
@@ -165,8 +173,10 @@ export default function App() {
       roots: customRoots,
       kinds: kinds.filter((k) => enabledKinds.has(k)),
       workers,
+      global_mode: globalMode,
+      global_ids: Array.from(globalIds).sort(),
     }),
-    [mode, customRoots, enabledKinds, workers],
+    [mode, customRoots, enabledKinds, workers, globalMode, globalIds],
   );
   const preferencesSaved =
     savedPreferences !== null &&
@@ -182,6 +192,8 @@ export default function App() {
           setCustomRoots(saved.roots);
           setEnabledKinds(new Set(saved.kinds));
           setWorkers(saved.workers);
+          setGlobalMode(saved.global_mode ?? false);
+          setGlobalIds(new Set(saved.global_ids ?? []));
           setSavedPreferences(saved);
         }
       })
@@ -198,6 +210,28 @@ export default function App() {
       live = false;
     };
   }, [native]);
+
+  useEffect(() => {
+    if (!globalMode || !native) return;
+    let live = true;
+    setGlobalLoading(true);
+    invoke<GlobalCache[]>("list_global_caches")
+      .then((entries) => {
+        if (live) setGlobalCaches(entries);
+      })
+      .catch((error) => {
+        if (live) {
+          setGlobalCaches([]);
+          setMessage(`无法发现全局缓存：${String(error)}`);
+        }
+      })
+      .finally(() => {
+        if (live) setGlobalLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [native, globalMode]);
 
   useEffect(() => {
     if (settings) setPreferencesError("");
@@ -376,7 +410,15 @@ export default function App() {
       setMessage(String(error));
     }
   }
-  const rootList = mode === "all" ? drives.map((d) => d.path) : customRoots;
+  const rootList = globalMode
+    ? globalCaches.filter((c) => globalIds.has(c.id)).map((c) => c.path)
+    : mode === "all"
+      ? drives.map((d) => d.path)
+      : customRoots;
+  const globalReady =
+    !globalLoading &&
+    globalIds.size > 0 &&
+    [...globalIds].every((id) => globalCaches.some((cache) => cache.id === id));
   const finishedRoots = Object.values(rootStatuses).filter(
     (s) => s.phase === "done" || s.phase === "skipped",
   ).length;
@@ -403,12 +445,31 @@ export default function App() {
       setMessage("请通过桌面应用运行以访问本机磁盘。浏览器仅用于查看界面。");
       return;
     }
-    if (mode === "custom" && !customRoots.length) {
+    if (
+      (globalMode && !globalReady) ||
+      (!globalMode && mode === "custom" && !customRoots.length)
+    ) {
       setSettings(true);
       return;
     }
     const id = crypto.randomUUID();
-    setScanKinds(new Set(enabledKinds));
+    setScanKinds(
+      globalMode
+        ? new Set(
+            globalCaches
+              .filter((c) => globalIds.has(c.id))
+              .map((c) =>
+                c.tool === "Go"
+                  ? "go"
+                  : c.tool === "Gradle"
+                    ? "java"
+                    : c.tool === "pip"
+                      ? "python"
+                      : "node",
+              ),
+          )
+        : new Set(enabledKinds),
+    );
     session.current = id;
     staged.current.clear();
     setItems(new Map());
@@ -475,8 +536,9 @@ export default function App() {
     try {
       await invoke("start_scan", {
         session: id,
-        roots: mode === "all" ? null : customRoots,
-        kinds: Array.from(enabledKinds),
+        roots: globalMode || mode === "all" ? null : customRoots,
+        kinds: globalMode ? [] : Array.from(enabledKinds),
+        globalIds: globalMode ? Array.from(globalIds) : null,
         workers,
         onEvent: channel,
       });
@@ -676,19 +738,27 @@ export default function App() {
               </div>
               <div className="scope-copy">
                 <strong>
-                  {mode === "all" ? "全盘扫描" : "自定义目录"}
+                  {globalMode
+                    ? "全局缓存"
+                    : mode === "all"
+                      ? "全盘扫描"
+                      : "自定义目录"}
                   <span className="tag">
-                    {mode === "all"
-                      ? preferencesSaved
-                        ? "已保存"
-                        : "默认范围"
-                      : `${customRoots.length} 个目录${preferencesSaved ? " · 已保存" : ""}`}
+                    {globalMode
+                      ? `${globalIds.size} 项${preferencesSaved ? " · 已保存" : ""}`
+                      : mode === "all"
+                        ? preferencesSaved
+                          ? "已保存"
+                          : "默认范围"
+                        : `${customRoots.length} 个目录${preferencesSaved ? " · 已保存" : ""}`}
                   </span>
                 </strong>
                 <p>
-                  {mode === "all"
-                    ? `自动扫描所有已挂载磁盘${drives.length ? ` · 已检测到 ${drives.length} 个磁盘` : ""}`
-                    : "扫描你选择的项目目录"}
+                  {globalMode
+                    ? "仅扫描所选工具缓存，不包含项目目录"
+                    : mode === "all"
+                      ? `自动扫描所有已挂载磁盘${drives.length ? ` · 已检测到 ${drives.length} 个磁盘` : ""}`
+                      : "扫描你选择的项目目录"}
                 </p>
               </div>
               <button
@@ -712,7 +782,9 @@ export default function App() {
                 <button
                   className="button primary"
                   onClick={start}
-                  disabled={busy || !enabledKinds.size}
+                  disabled={
+                    busy || (globalMode ? !globalReady : !enabledKinds.size)
+                  }
                 >
                   <Play size={15} fill="currentColor" />
                   {summary ? "重新扫描" : "开始扫描"}
@@ -728,7 +800,9 @@ export default function App() {
                   onClick={() => setSettings(true)}
                   aria-label="选择扫描类型"
                 >
-                  {enabledKinds.size} / {kinds.length} 类项目{" "}
+                  {globalMode
+                    ? `${globalIds.size} 项全局缓存`
+                    : `${enabledKinds.size} / ${projectKinds.length} 类项目`}{" "}
                   <Settings2 size={12} />
                 </button>
               </div>
@@ -1235,84 +1309,167 @@ export default function App() {
             <div className="scope-options">
               <button
                 disabled={busy}
-                className={mode === "all" ? "chosen" : ""}
-                onClick={() => setMode("all")}
+                className={!globalMode && mode === "all" ? "chosen" : ""}
+                onClick={() => {
+                  setGlobalMode(false);
+                  setMode("all");
+                }}
               >
                 <HardDrive size={20} />
                 <strong>所有磁盘</strong>
                 <small>本地、外置与已映射网络盘</small>
-                {mode === "all" && <Check size={16} />}
+                {!globalMode && mode === "all" && <Check size={16} />}
               </button>
               <button
                 disabled={busy}
-                className={mode === "custom" ? "chosen" : ""}
-                onClick={() => setMode("custom")}
+                className={!globalMode && mode === "custom" ? "chosen" : ""}
+                onClick={() => {
+                  setGlobalMode(false);
+                  setMode("custom");
+                }}
               >
                 <FolderOpen size={20} />
                 <strong>自定义目录</strong>
                 <small>只扫描你选择的位置</small>
-                {mode === "custom" && <Check size={16} />}
+                {!globalMode && mode === "custom" && <Check size={16} />}
+              </button>
+              <button
+                disabled={busy}
+                className={globalMode ? "chosen" : ""}
+                onClick={() => setGlobalMode(true)}
+              >
+                <Layers3 size={20} />
+                <strong>全局缓存</strong>
+                <small>工具的共享下载与构建缓存</small>
+                {globalMode && <Check size={16} />}
               </button>
             </div>
-            <div className="settings-section">
-              <ToolchainPicker
-                selected={enabledKinds}
-                onChange={setEnabledKinds}
-                disabled={busy}
-              />
-            </div>
-            <div className="settings-section">
-              <h3>{mode === "all" ? "检测到的磁盘" : "自定义目录"}</h3>
-              {!rootList.length && (
-                <p className="muted">
-                  {native
-                    ? "暂无目录，选择目录或重新打开应用以刷新磁盘列表。"
-                    : "桌面应用会在此显示本机磁盘。"}
+            {!globalMode && (
+              <div className="settings-section">
+                <ToolchainPicker
+                  selected={enabledKinds}
+                  onChange={setEnabledKinds}
+                  disabled={busy}
+                />
+              </div>
+            )}
+            {globalMode && (
+              <div className="settings-section">
+                <h3>选择全局缓存</h3>
+                <p className="small muted">
+                  只查找常规位置。共享下载缓存可能被多个项目使用；清理后可能需要重新下载。
                 </p>
-              )}
-              {rootList.map((path) => (
-                <div className="drive-row" key={path}>
-                  <HardDrive size={16} />
-                  <span title={path}>{displayPath(path)}</span>
-                  <small title={rootStatuses[displayPath(path)]?.reason}>
-                    {rootStatuses[displayPath(path)]?.phase === "done"
-                      ? rootStatuses[displayPath(path)]?.errors
-                        ? "已结束 · 有读取错误"
-                        : "已结束"
-                      : rootStatuses[displayPath(path)]?.phase === "scanning"
-                        ? "扫描中"
-                        : rootStatuses[displayPath(path)]?.phase === "skipped"
-                          ? "已跳过"
-                          : rootStatuses[displayPath(path)]?.phase ===
-                              "cancelled"
-                            ? "已停止"
-                            : "待扫描"}
-                  </small>
-                  {mode === "custom" && (
+                {globalLoading ? (
+                  <p className="small muted">正在检查常规缓存位置…</p>
+                ) : globalCaches.length === 0 ? (
+                  <p className="small muted">
+                    未发现可识别的全局缓存；自定义位置暂不支持。
+                  </p>
+                ) : (
+                  <div className="global-cache-list">
+                    {globalCaches.map((cache) => (
+                      <label key={cache.id} className="global-cache-option">
+                        <input
+                          type="checkbox"
+                          checked={globalIds.has(cache.id)}
+                          disabled={busy}
+                          aria-label={`${cache.tool} ${cache.category} ${cache.id}`}
+                          onChange={() =>
+                            setGlobalIds((old) => {
+                              const next = new Set(old);
+                              if (next.has(cache.id)) next.delete(cache.id);
+                              else next.add(cache.id);
+                              return next;
+                            })
+                          }
+                        />
+                        <span>
+                          <strong>
+                            {cache.tool} · {cache.category}
+                          </strong>
+                          <small>{displayPath(cache.path)}</small>
+                          <small>{cache.impact}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {[...globalIds].some(
+                  (id) => !globalCaches.some((cache) => cache.id === id),
+                ) &&
+                  !globalLoading && (
                     <button
-                      className="icon-button"
-                      disabled={busy}
-                      aria-label={`移除 ${path}`}
+                      className="text-button"
                       onClick={() =>
-                        setCustomRoots((old) => old.filter((p) => p !== path))
+                        setGlobalIds(
+                          (old) =>
+                            new Set(
+                              [...old].filter((id) =>
+                                globalCaches.some((cache) => cache.id === id),
+                              ),
+                            ),
+                        )
                       }
                     >
-                      <X size={15} />
+                      移除已失效的缓存选择
                     </button>
                   )}
-                </div>
-              ))}
-              {mode === "custom" && (
-                <button
-                  className="button secondary add-folder"
-                  onClick={addFolder}
-                  disabled={busy}
-                >
-                  <Plus size={15} />
-                  添加目录
-                </button>
-              )}
-            </div>
+              </div>
+            )}
+            {!globalMode && (
+              <div className="settings-section">
+                <h3>{mode === "all" ? "检测到的磁盘" : "自定义目录"}</h3>
+                {!rootList.length && (
+                  <p className="muted">
+                    {native
+                      ? "暂无目录，选择目录或重新打开应用以刷新磁盘列表。"
+                      : "桌面应用会在此显示本机磁盘。"}
+                  </p>
+                )}
+                {rootList.map((path) => (
+                  <div className="drive-row" key={path}>
+                    <HardDrive size={16} />
+                    <span title={path}>{displayPath(path)}</span>
+                    <small title={rootStatuses[displayPath(path)]?.reason}>
+                      {rootStatuses[displayPath(path)]?.phase === "done"
+                        ? rootStatuses[displayPath(path)]?.errors
+                          ? "已结束 · 有读取错误"
+                          : "已结束"
+                        : rootStatuses[displayPath(path)]?.phase === "scanning"
+                          ? "扫描中"
+                          : rootStatuses[displayPath(path)]?.phase === "skipped"
+                            ? "已跳过"
+                            : rootStatuses[displayPath(path)]?.phase ===
+                                "cancelled"
+                              ? "已停止"
+                              : "待扫描"}
+                    </small>
+                    {mode === "custom" && (
+                      <button
+                        className="icon-button"
+                        disabled={busy}
+                        aria-label={`移除 ${path}`}
+                        onClick={() =>
+                          setCustomRoots((old) => old.filter((p) => p !== path))
+                        }
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {mode === "custom" && (
+                  <button
+                    className="button secondary add-folder"
+                    onClick={addFolder}
+                    disabled={busy}
+                  >
+                    <Plus size={15} />
+                    添加目录
+                  </button>
+                )}
+              </div>
+            )}
             <div className="settings-section">
               <h3>扫描并发</h3>
               <label className="worker-control">
@@ -1366,8 +1523,10 @@ export default function App() {
               className="button primary"
               disabled={
                 busy ||
-                !enabledKinds.size ||
-                (mode === "custom" && !customRoots.length)
+                (globalMode
+                  ? !globalReady
+                  : !enabledKinds.size ||
+                    (mode === "custom" && !customRoots.length))
               }
               onClick={rememberSettings}
             >
@@ -1451,12 +1610,18 @@ export default function App() {
                 包含 Python 虚拟环境，其已安装的包和环境内文件将一并移入回收站。
               </p>
             )}
+            {chosen.some((i) => i.rule?.startsWith("global:")) && (
+              <p className="warning">
+                全局缓存可能被多个项目共享。清理后可能需要重新下载依赖或重新编译；实际释放空间受硬链接和回收站影响。
+              </p>
+            )}
             <div className="confirm-list">
               {chosen.map((i) => (
                 <div key={i.id}>
                   <Folder size={14} />
                   <span title={displayPath(i.path)}>{displayPath(i.path)}</span>
                   <strong>{size(i.bytes)}</strong>
+                  {i.rule?.startsWith("global:") && <small>{i.evidence}</small>}
                 </div>
               ))}
             </div>

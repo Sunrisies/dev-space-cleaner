@@ -1,8 +1,16 @@
 import catalog from "./toolchains.json" with { type: "json" };
 export type Kind = keyof typeof catalog;
 export const kinds = Object.keys(catalog) as Kind[];
+export const projectKinds = kinds.filter((kind) => kind !== "go");
 export const kindInfo = catalog;
 export type Drive = { path: string; label: string };
+export type GlobalCache = {
+  id: string;
+  tool: string;
+  path: string;
+  category: string;
+  impact: string;
+};
 export type Candidate = {
   id: number;
   path: string;

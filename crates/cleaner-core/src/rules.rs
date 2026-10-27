@@ -8,6 +8,7 @@ use std::{fs, io::Read, path::Path};
 pub enum Kind {
     Node,
     Rust,
+    Go,
     Python,
     Android,
     Java,
@@ -929,13 +930,13 @@ mod tests {
     #[test]
     fn catalog_ids_round_trip_and_unknown_types_are_rejected() {
         let all = Kind::all();
-        assert_eq!(all.len(), 16);
+        assert_eq!(all.len(), 17);
         for kind in all {
             let id = serde_json::to_value(kind).unwrap();
             assert_eq!(Kind::from_id(id.as_str().unwrap()), Some(kind));
         }
         assert!(Kind::from_id("build").is_none());
-        assert!(Kind::from_id("go").is_none());
+        assert_eq!(Kind::from_id("go"), Some(Kind::Go));
     }
     #[test]
     fn dotnet_outputs_do_not_depend_on_other_cleanup_candidates() {

@@ -8,6 +8,8 @@ export type Preferences = {
   roots: string[];
   kinds: Kind[];
   workers: number;
+  global_mode?: boolean;
+  global_ids?: string[];
 };
 export const preferencesKey = "huanj-scan-settings-v1";
 
@@ -25,11 +27,23 @@ function validate(value: unknown): Preferences {
     !Number.isInteger(p.workers) ||
     p.workers! < 1 ||
     p.workers! > 16 ||
-    (p.mode === "custom" && !p.roots.length)
+    (p.global_mode !== undefined && typeof p.global_mode !== "boolean") ||
+    (p.global_ids !== undefined &&
+      (!Array.isArray(p.global_ids) ||
+        p.global_ids.length > 100 ||
+        p.global_ids.some(
+          (id) => typeof id !== "string" || !/^[a-zA-Z0-9-]{1,128}$/.test(id),
+        ))) ||
+    (p.global_mode === true && !p.global_ids?.length) ||
+    (p.mode === "custom" && !p.roots.length && !p.global_mode)
   ) {
     throw new Error("保存的扫描设置格式不正确，请重新设置后保存");
   }
-  return p as Preferences;
+  return {
+    ...(p as Preferences),
+    global_mode: p.global_mode ?? false,
+    global_ids: p.global_ids ?? [],
+  };
 }
 
 export async function loadPreferences(

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Search } from "lucide-react";
-import { kinds, kindInfo, type Kind } from "./types";
+import { projectKinds as kinds, kindInfo, type Kind } from "./types";
 
 export function ToolchainPicker({
   selected,
@@ -84,7 +84,7 @@ export function ToolchainPicker({
         {!visible.length && <p className="small muted">没有匹配的项目类型。</p>}
       </div>
       <p className="small muted">
-        仅扫描有项目与产物标识的目录；Go、Xcode 全局缓存及工具下载仓库暂未纳入。
+        仅扫描有项目与产物标识的目录；全局缓存可在扫描范围中单独选择。
       </p>
     </section>
   );

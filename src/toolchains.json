@@ -11,6 +11,12 @@
     "letter": "Rs",
     "hint": "Cargo 构建产物"
   },
+  "go": {
+    "label": "Go",
+    "dir": "go-build / download",
+    "letter": "Go",
+    "hint": "Go 全局构建与模块下载缓存"
+  },
   "python": {
     "label": "Python",
     "dir": ".venv",
