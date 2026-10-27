@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { summarize } from "../../src/summary";
+import { groupProjects, volumeOf } from "../../src/project-groups";
 import type { Candidate } from "../../src/types";
 const fixtures: Candidate[] = [
   {
@@ -281,6 +282,108 @@ test("aggregation preserves large values and distinguishes pending, partial and 
     bytes: 2 * 1024 ** 3 + 77,
     removed: 1,
   });
+});
+
+test("project groups use paths, preserve partial status and ignore successfully removed sizes", () => {
+  const sameProject: Candidate[] = [
+    fixtures[0],
+    {
+      ...fixtures[2],
+      id: 8,
+      path: "d:\\DEMO\\RUST-ALPHA\\node_modules",
+      bytes: 2048,
+      complete: false,
+    },
+    {
+      ...fixtures[3],
+      id: 9,
+      path: "D:\\demo\\rust-alpha\\.venv",
+      bytes: 4096,
+      measured: false,
+    },
+    {
+      ...fixtures[0],
+      id: 10,
+      path: "E:\\other\\rust-alpha\\target",
+      bytes: 8192,
+    },
+  ];
+  const groups = groupProjects(sameProject, new Set([8]));
+  expect(groups).toHaveLength(2);
+  expect(groups.find((g) => g.items.length === 3)).toMatchObject({
+    bytes: 5120,
+    pending: true,
+    incomplete: false,
+  });
+  expect(volumeOf("\\\\?\\D:\\demo\\a")).toBe("D:");
+  expect(volumeOf("\\\\server\\share\\repo\\node_modules")).toBe(
+    "//server/share",
+  );
+  expect(volumeOf("/Volumes/External/repo/target")).toBe("/Volumes/External");
+});
+
+test("project view aggregates sibling caches and filters without changing overall totals", async ({
+  page,
+}) => {
+  const now = Math.floor(Date.now() / 1000);
+  await mockDesktop(page, false, false, [
+    {
+      ...fixtures[2],
+      id: 5,
+      path: "D:\\demo\\rust-alpha\\node_modules",
+      project: "rust-alpha",
+      bytes: 4096,
+    },
+    {
+      ...fixtures[3],
+      id: 6,
+      path: "D:\\demo\\rust-alpha\\.venv",
+      project: "rust-alpha",
+      bytes: 8192,
+    },
+    {
+      ...fixtures[0],
+      id: 7,
+      path: "E:\\workspace\\large\\target",
+      project: "large",
+      bytes: 2 * 1024 ** 3,
+      modified: now,
+    },
+  ]);
+  const total = page.locator(".main-metric .metric-value");
+  const before = await total.innerText();
+  await page.getByRole("button", { name: "目录视图" }).click();
+  const group = page
+    .locator(".project-group-row")
+    .filter({ hasText: "rust-alpha" });
+  await group.scrollIntoViewIfNeeded();
+  await expect(group).toContainText("13 KiB");
+  await expect(group).toContainText("3 项剩余");
+  await group.getByRole("button", { name: /rust-alpha/ }).click();
+  await expect(page.locator('[data-candidate-id="5"]')).toBeVisible();
+  await group.getByRole("checkbox").check();
+  await expect(
+    page.locator('[data-candidate-id="1"]').getByRole("checkbox"),
+  ).toBeChecked();
+  await page.getByRole("button", { name: "筛选", exact: true }).click();
+  await page.getByRole("combobox", { name: "按磁盘筛选" }).selectOption("E:");
+  await page
+    .getByRole("combobox", { name: "按大小筛选" })
+    .selectOption(String(1024 ** 3));
+  await expect(page.locator(".project-group-row")).toHaveCount(1);
+  await expect(page.locator(".project-group-row")).toContainText("large");
+  expect(await total.innerText()).toEqual(before);
+  await page
+    .getByRole("combobox", { name: "按修改日期筛选" })
+    .selectOption("90");
+  await expect(page.getByText("没有匹配的目录")).toBeVisible();
+  await page.getByRole("button", { name: "清除筛选" }).click();
+  await expect(page.locator(".project-group-row")).not.toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollHeight > innerHeight,
+    ),
+  ).toBe(false);
 });
 
 test("expanded toolchains have correct sums, real directory names and directory menus", async ({

@@ -15,4 +15,6 @@
 
 第 1 项：已接入独立全局扫描、按工具汇总、设置保存、影响提示和清理前重验。只识别常规目录，不执行工具命令；自定义缓存位置、Xcode DerivedData 和其他下载仓库仍未覆盖。Windows 临时目录样例、工作区测试及 UI 场景已验证；Unix 链接样例需要在 Unix 环境运行。
 
+第 2 项：目录／项目视图可切换，项目分组保留每项详情与右击菜单，支持组内批量选择；按磁盘、大小和目录修改日期筛选不改变整体汇总。分组按候选的归属目录计算，Bundler 例外使用项目目录，不猜测跨目录 workspace。大小筛选只包含已完整统计项目。
+
 第 6 项的前期诊断：首次 GitHub Actions 中 Windows 和布局任务成功，两个 Mac 任务在 clippy 阶段失败。Apple Silicon 日志显示 `crates/cleaner-core/src/platform.rs` 的 macOS 分支触发 `clippy::collapsible_if`；详细修复及两架构重验仍未进行。

@@ -10,6 +10,7 @@ import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ToolchainPicker } from "./ToolchainPicker";
+import { groupProjects, volumeOf } from "./project-groups";
 import { summarize } from "./summary";
 import {
   loadPreferences,
@@ -120,6 +121,14 @@ export default function App() {
   const [filter, setFilter] = useState<Kind | "all">("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"size" | "name">("size");
+  const [projectView, setProjectView] = useState(false);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
+    new Set(),
+  );
+  const [showFilters, setShowFilters] = useState(false);
+  const [volumeFilter, setVolumeFilter] = useState("all");
+  const [minimumSize, setMinimumSize] = useState(0);
+  const [modifiedFilter, setModifiedFilter] = useState("all");
   const [items, setItems] = useState<Map<number, Candidate>>(new Map());
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState<Progress>(emptyProgress);
@@ -306,10 +315,19 @@ export default function App() {
     detailSnapshot && (items.get(detailSnapshot.id) ?? detailSnapshot);
   const visible = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
+    const now = Date.now() / 1000;
     return allItems
       .filter(
         (i) =>
           (filter === "all" || i.kind === filter) &&
+          (volumeFilter === "all" || volumeOf(i.path) === volumeFilter) &&
+          (!minimumSize ||
+            (i.measured && i.complete && i.bytes >= minimumSize)) &&
+          (modifiedFilter === "all" ||
+            (i.modified != null &&
+              (modifiedFilter === "newer30"
+                ? i.modified >= now - 30 * 86400
+                : i.modified < now - Number(modifiedFilter) * 86400))) &&
           (!q ||
             i.path.toLocaleLowerCase().includes(q) ||
             i.project.toLocaleLowerCase().includes(q)),
@@ -319,7 +337,15 @@ export default function App() {
           ? b.bytes - a.bytes || a.id - b.id
           : a.project.localeCompare(b.project),
       );
-  }, [allItems, filter, query, sort]);
+  }, [
+    allItems,
+    filter,
+    query,
+    sort,
+    volumeFilter,
+    minimumSize,
+    modifiedFilter,
+  ]);
   const selectable = (i: Candidate) =>
     i.measured && i.complete && !cleanResults.get(i.id)?.success;
   const chosen = allItems.filter((i) => selected.has(i.id) && selectable(i));
@@ -327,12 +353,48 @@ export default function App() {
   const eligible = visible.filter(selectable);
   const allChecked =
     eligible.length > 0 && eligible.every((i) => selected.has(i.id));
+  const volumes = useMemo(
+    () => [...new Set(allItems.map((i) => volumeOf(i.path)))].sort(),
+    [allItems],
+  );
+  const hasResultFilter =
+    !!query ||
+    filter !== "all" ||
+    volumeFilter !== "all" ||
+    minimumSize > 0 ||
+    modifiedFilter !== "all";
+  const projects = useMemo(
+    () =>
+      !projectView
+        ? []
+        : groupProjects(visible, removed).sort((a, b) =>
+            sort === "size"
+              ? b.bytes - a.bytes || a.name.localeCompare(b.name)
+              : a.name.localeCompare(b.name),
+          ),
+    [visible, removed, sort, projectView],
+  );
+  const rows = useMemo(
+    () =>
+      projectView
+        ? projects.flatMap((project) => [
+            { type: "project" as const, project },
+            ...(expandedProjects.has(project.key)
+              ? project.items.map((item) => ({ type: "item" as const, item }))
+              : []),
+          ])
+        : visible.map((item) => ({ type: "item" as const, item })),
+    [projectView, projects, visible, expandedProjects],
+  );
   const virtualizer = useVirtualizer({
-    count: visible.length,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 64,
     overscan: 7,
-    getItemKey: (i) => visible[i].id,
+    getItemKey: (i) =>
+      rows[i].type === "project"
+        ? `project:${rows[i].project.key}`
+        : `item:${rows[i].item.id}`,
   });
   const totals = useMemo(
     () => summarize(allItems, removed),
@@ -910,6 +972,13 @@ export default function App() {
               <h2>
                 扫描结果<span>{visible.length}</span>
               </h2>
+              <button
+                className="sort-button view-toggle"
+                aria-pressed={projectView}
+                onClick={() => setProjectView(!projectView)}
+              >
+                {projectView ? "项目视图" : "目录视图"}
+              </button>
               <select
                 className="kind-filter"
                 aria-label="筛选开发环境"
@@ -942,6 +1011,89 @@ export default function App() {
                     </button>
                   )}
                 </label>
+                <div className="advanced-filter">
+                  <button
+                    className="sort-button"
+                    aria-expanded={showFilters}
+                    onClick={() => setShowFilters(!showFilters)}
+                  >
+                    筛选
+                    {(volumeFilter !== "all" ||
+                      minimumSize !== 0 ||
+                      modifiedFilter !== "all") &&
+                      " ·"}
+                  </button>
+                  {showFilters && (
+                    <div
+                      className="filter-popover"
+                      role="group"
+                      aria-label="结果筛选"
+                    >
+                      <label>
+                        磁盘或卷
+                        <select
+                          aria-label="按磁盘筛选"
+                          value={volumeFilter}
+                          onChange={(e) => setVolumeFilter(e.target.value)}
+                        >
+                          <option value="all">所有磁盘</option>
+                          {volumeFilter !== "all" &&
+                            !volumes.includes(volumeFilter) && (
+                              <option value={volumeFilter}>
+                                {volumeFilter} · 本次无结果
+                              </option>
+                            )}
+                          {volumes.map((volume) => (
+                            <option key={volume} value={volume}>
+                              {volume}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        最小大小
+                        <select
+                          aria-label="按大小筛选"
+                          value={minimumSize}
+                          onChange={(e) =>
+                            setMinimumSize(Number(e.target.value))
+                          }
+                        >
+                          <option value={0}>不限</option>
+                          <option value={100 * 1024 ** 2}>100 MiB</option>
+                          <option value={1024 ** 3}>1 GiB</option>
+                          <option value={5 * 1024 ** 3}>5 GiB</option>
+                        </select>
+                      </label>
+                      <label>
+                        目录修改日期
+                        <select
+                          aria-label="按修改日期筛选"
+                          value={modifiedFilter}
+                          onChange={(e) => setModifiedFilter(e.target.value)}
+                        >
+                          <option value="all">不限</option>
+                          <option value="newer30">近 30 天</option>
+                          <option value="90">90 天前</option>
+                          <option value="365">一年前</option>
+                        </select>
+                      </label>
+                      <p>
+                        大小筛选仅包含完整统计；目录修改时间不代表最后使用时间。
+                      </p>
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setVolumeFilter("all");
+                          setMinimumSize(0);
+                          setModifiedFilter("all");
+                        }}
+                      >
+                        清除筛选
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button
                   className="sort-button"
                   title="切换大小或项目名称排序"
@@ -977,7 +1129,98 @@ export default function App() {
                   }}
                 >
                   {virtualizer.getVirtualItems().map((row) => {
-                    const item = visible[row.index];
+                    const entry = rows[row.index];
+                    if (entry.type === "project") {
+                      const project = entry.project;
+                      const available = project.items.filter(selectable);
+                      const checked =
+                        available.length > 0 &&
+                        available.every((item) => selected.has(item.id));
+                      return (
+                        <div
+                          key={`project:${project.key}`}
+                          className="result-row result-grid project-group-row"
+                          data-project-path={project.path}
+                          style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: "100%",
+                            height: row.size,
+                            transform: `translateY(${row.start}px)`,
+                          }}
+                        >
+                          <label className="check-wrap">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={busy || !available.length}
+                              aria-label={`选择项目 ${project.name} 的完整目录`}
+                              onChange={() =>
+                                setSelected((old) => {
+                                  const next = new Set(old);
+                                  for (const item of available) {
+                                    if (checked) next.delete(item.id);
+                                    else next.add(item.id);
+                                  }
+                                  return next;
+                                })
+                              }
+                            />
+                          </label>
+                          <button
+                            className="project-group-button"
+                            aria-expanded={expandedProjects.has(project.key)}
+                            onClick={() =>
+                              setExpandedProjects((old) => {
+                                const next = new Set(old);
+                                if (next.has(project.key))
+                                  next.delete(project.key);
+                                else next.add(project.key);
+                                return next;
+                              })
+                            }
+                          >
+                            <ChevronRight
+                              size={15}
+                              className={
+                                expandedProjects.has(project.key)
+                                  ? "expanded-chevron"
+                                  : ""
+                              }
+                            />
+                            <span>
+                              <strong>{project.name}</strong>
+                              <small title={project.path}>{project.path}</small>
+                            </span>
+                          </button>
+                          <span className="muted">
+                            {
+                              project.items.filter(
+                                (item) => !removed.has(item.id),
+                              ).length
+                            }{" "}
+                            项剩余
+                          </span>
+                          <span className="row-size right">
+                            {size(project.bytes)}
+                            {project.pending ? (
+                              <small>统计中</small>
+                            ) : project.items.some(
+                                (item) =>
+                                  cleanResults.get(item.id)?.success === false,
+                              ) ? (
+                              <small className="error-text">待复核</small>
+                            ) : project.incomplete ? (
+                              <small className="error-text">部分统计</small>
+                            ) : null}
+                          </span>
+                          <span />
+                          <span />
+                        </div>
+                      );
+                    }
+                    const item = entry.item;
                     const result = cleanResults.get(item.id);
                     return (
                       <div
@@ -1091,7 +1334,7 @@ export default function App() {
                     </span>
                   </div>
                   <h3>
-                    {query || filter !== "all"
+                    {hasResultFilter
                       ? "没有匹配的目录"
                       : scanning
                         ? "正在寻找开发目录"
@@ -1100,7 +1343,7 @@ export default function App() {
                           : "好项目，值得一个清爽的空间"}
                   </h3>
                   <p>
-                    {query || filter !== "all"
+                    {hasResultFilter
                       ? "试试其他关键词，或切换到全部目录。"
                       : scanning
                         ? "结果会陆续出现，目录大小会在统计后补充。"
@@ -1108,7 +1351,7 @@ export default function App() {
                           ? "可以调整范围或扫描类型后重试；有读取错误时请查看详情。"
                           : "从一次扫描开始，看看依赖与构建产物占了多少空间。"}
                   </p>
-                  {!summary && !scanning && !query && filter === "all" && (
+                  {!summary && !scanning && !hasResultFilter && (
                     <div className="empty-tags">
                       <span>
                         <Code2 size={13} />
