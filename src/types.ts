@@ -53,7 +53,20 @@ export type ScanEvent =
   | { type: "root_skipped"; data: { path: string; reason: string } }
   | { type: "finished"; data: Summary };
 export type Envelope = { session: string; event: ScanEvent };
-export type CleanResult = { id: number; success: boolean; message: string };
+export type CleanResult = {
+  id: number;
+  success: boolean;
+  message: string;
+  history_error?: string;
+};
+export type CleanupRecord = {
+  timestamp_ms: number;
+  path: string;
+  bytes: number;
+  kind: Kind;
+  success: boolean;
+  message: string;
+};
 export type PreflightResult = { id: number; valid: boolean; message: string };
 export const emptyProgress: Progress = {
   directories: 0,

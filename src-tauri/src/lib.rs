@@ -1,3 +1,4 @@
+mod cleanup_history;
 mod directory;
 mod history;
 mod preferences;
@@ -306,18 +307,33 @@ fn cancel_scan(session: String, state: State<'_, AppState>) -> Result<(), String
 
 #[tauri::command]
 async fn clean_selected(
+    app: tauri::AppHandle,
     session: String,
     ids: Vec<u64>,
     state: State<'_, AppState>,
+    log_state: State<'_, cleanup_history::CleanupHistoryLock>,
 ) -> Result<Vec<CleanResult>, String> {
     let shared = state.0.clone();
     let items = {
         let mut current = shared.lock().map_err(|e| e.to_string())?;
         take_selection(&mut current, &session, ids)?
     };
-    let result =
-        tauri::async_runtime::spawn_blocking(move || items.iter().map(clean).collect::<Vec<_>>())
-            .await;
+    let log_path = cleanup_history::location(&app);
+    let log_lock = log_state.0.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut results = items.iter().map(clean).collect::<Vec<_>>();
+        let written = log_path.and_then(|path| {
+            let _guard = log_lock.lock().map_err(|_| "清理记录锁异常".to_string())?;
+            cleanup_history::append(&path, &items, &results)
+        });
+        if let Err(error) = written {
+            for result in &mut results {
+                result.history_error = Some(error.clone());
+            }
+        }
+        results
+    })
+    .await;
     let mut current = shared.lock().map_err(|e| e.to_string())?;
     current.busy = false;
     let results = result.map_err(|e| format!("清理任务异常：{e}"))?;
@@ -368,6 +384,7 @@ pub fn run() {
         .manage(AppState::default())
         .manage(PreferencesLock::default())
         .manage(history::HistoryLock::default())
+        .manage(cleanup_history::CleanupHistoryLock::default())
         .invoke_handler(tauri::generate_handler![
             list_drives,
             list_global_caches,
@@ -376,6 +393,8 @@ pub fn run() {
             preview_selected,
             refresh_candidate,
             clean_selected,
+            cleanup_history::list_cleanup_history,
+            cleanup_history::open_recycle_bin,
             open_candidate_directory,
             preferences::load_preferences,
             preferences::save_preferences,

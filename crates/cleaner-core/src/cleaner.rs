@@ -7,6 +7,8 @@ pub struct CleanResult {
     pub id: u64,
     pub success: bool,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_error: Option<String>,
 }
 
 pub fn validate(item: &Candidate) -> Result<(), String> {
@@ -50,11 +52,13 @@ pub fn clean(item: &Candidate) -> CleanResult {
             id: item.id,
             success: true,
             message: "已移入回收站；清空回收站后才会释放空间".into(),
+            history_error: None,
         },
         Err(message) => CleanResult {
             id: item.id,
             success: false,
             message,
+            history_error: None,
         },
     }
 }

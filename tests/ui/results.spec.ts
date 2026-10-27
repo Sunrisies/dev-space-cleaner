@@ -71,10 +71,11 @@ async function mockDesktop(
   failClean = false,
   extra: Candidate[] = [],
   preflightFail = false,
+  historyFail = false,
 ) {
   await page.setViewportSize({ width: 1080, height: 650 });
   await page.addInitScript(
-    ({ fixtures, pending, failClean, preflightFail }) => {
+    ({ fixtures, pending, failClean, preflightFail, historyFail }) => {
       // Mock only native IPC. The real Channel, scan reducer, virtual list and menus run unchanged.
       const host = window as any;
       host.isTauri = true;
@@ -113,6 +114,7 @@ async function mockDesktop(
               message: failClean
                 ? "Windows 报告回收目标存在共享冲突，相关文件可能被占用。请关闭使用该目录的程序后重试（0x80270028）。未改用永久删除。"
                 : "已移入回收站",
+              history_error: historyFail ? "记录文件不可写" : undefined,
             }));
           if (command === "start_scan") {
             host.lastScanKinds = args.kinds;
@@ -161,7 +163,13 @@ async function mockDesktop(
         },
       };
     },
-    { fixtures: [...fixtures, ...extra], pending, failClean, preflightFail },
+    {
+      fixtures: [...fixtures, ...extra],
+      pending,
+      failClean,
+      preflightFail,
+      historyFail,
+    },
   );
   await page.goto("/");
   await page.getByRole("button", { name: "开始扫描", exact: true }).click();
@@ -182,6 +190,24 @@ test("changed recognition evidence blocks confirmation before cleanup", async ({
     dialog.getByRole("button", { name: "确认移入回收站" }),
   ).toBeDisabled();
   await expect(dialog.getByText(/构建产物会被移除/)).toBeVisible();
+});
+
+test("a cleanup succeeds but reports a failure to persist its local history", async ({
+  page,
+}) => {
+  await mockDesktop(page, false, false, [], false, true);
+  await page.locator('[data-candidate-id="1"]').getByRole("checkbox").check();
+  await page.getByRole("button", { name: "清理所选目录" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "确认移入回收站" })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "清理记录保存失败" }),
+  ).toContainText("记录文件不可写");
+  await expect(page.locator('[data-candidate-id="1"]')).toContainText(
+    "已移入回收站",
+  );
 });
 
 test("type totals match rows, ignore search filters, and right click opens the scanned ID", async ({

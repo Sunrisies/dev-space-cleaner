@@ -10,6 +10,7 @@ import { invoke, isTauri, Channel } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ToolchainPicker } from "./ToolchainPicker";
+import { CleanupHistory } from "./CleanupHistory";
 import { groupProjects, volumeOf } from "./project-groups";
 import { cleanupImpact } from "./cleanup-impact";
 import { loadHistory, saveHistory } from "./history";
@@ -27,6 +28,7 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
+  ClipboardList,
   Code2,
   Cpu,
   Folder,
@@ -57,6 +59,7 @@ import {
   size,
   type Candidate,
   type CleanResult,
+  type CleanupRecord,
   type Drive,
   type GlobalCache,
   type Envelope,
@@ -161,6 +164,10 @@ export default function App() {
   const [detailSnapshot, setDetail] = useState<Candidate | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [cleanReport, setCleanReport] = useState(false);
+  const [cleanupHistoryOpen, setCleanupHistoryOpen] = useState(false);
+  const [cleanupHistory, setCleanupHistory] = useState<CleanupRecord[]>([]);
+  const [cleanupHistoryError, setCleanupHistoryError] = useState("");
+  const [cleanupHistoryLoading, setCleanupHistoryLoading] = useState(false);
   const [cleanResults, setCleanResults] = useState<Map<number, CleanResult>>(
     new Map(),
   );
@@ -797,13 +804,40 @@ export default function App() {
       );
       if (results.some((result) => !result.success)) setCleanReport(true);
       setSelected((old) => new Set([...old].filter((id) => !success.has(id))));
+      const historyError = results.find(
+        (result) => result.history_error,
+      )?.history_error;
       setMessage(
-        `已移入回收站 ${success.size} 项${results.length > success.size ? `，${results.length - success.size} 项失败，请查看对应目录详情` : "。清空回收站后才会释放空间。"}`,
+        `已移入回收站 ${success.size} 项${results.length > success.size ? `，${results.length - success.size} 项失败，请查看对应目录详情` : "。清空回收站后才会释放空间。"}${historyError ? ` 清理记录保存失败：${historyError}` : ""}`,
       );
     } catch (error) {
       setMessage(String(error));
     } finally {
       setCleaning(false);
+    }
+  }
+  async function showCleanupHistory() {
+    setCleanupHistoryOpen(true);
+    setCleanupHistoryError("");
+    if (!native) {
+      setCleanupHistory([]);
+      return;
+    }
+    setCleanupHistoryLoading(true);
+    try {
+      setCleanupHistory(await invoke<CleanupRecord[]>("list_cleanup_history"));
+    } catch (error) {
+      setCleanupHistory([]);
+      setCleanupHistoryError(String(error));
+    } finally {
+      setCleanupHistoryLoading(false);
+    }
+  }
+  async function openRecycleBin() {
+    try {
+      await invoke("open_recycle_bin");
+    } catch (error) {
+      setCleanupHistoryError(String(error));
     }
   }
   async function addFolder() {
@@ -880,6 +914,14 @@ export default function App() {
           <button className="nav-item" onClick={() => setSettings(true)}>
             <Settings2 size={17} />
             <span>扫描设置</span>
+          </button>
+          <button
+            className="nav-item"
+            disabled={busy}
+            onClick={showCleanupHistory}
+          >
+            <ClipboardList size={17} />
+            <span>清理记录</span>
           </button>
           <button className="nav-item" onClick={() => setHelp(true)}>
             <CircleHelp size={17} />
@@ -1704,6 +1746,16 @@ export default function App() {
             <p className="modal-description">
               以下目录未确认完成回收。请检查具体原因后重新扫描或重试清理。
             </p>
+            {failedItems.some(
+              (item) => cleanResults.get(item.id)?.history_error,
+            ) && (
+              <p className="error-text small" role="alert">
+                清理记录保存失败：
+                {failedItems
+                  .map((item) => cleanResults.get(item.id)?.history_error)
+                  .find(Boolean)}
+              </p>
+            )}
             <div className="issue-list">
               {failedItems.map((item) => (
                 <div key={item.id}>
@@ -1731,6 +1783,43 @@ export default function App() {
               onClick={() => setCleanReport(false)}
             >
               关闭
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {cleanupHistoryOpen && (
+        <Modal
+          title="清理记录"
+          onClose={() => setCleanupHistoryOpen(false)}
+          wide
+        >
+          <div className="modal-body">
+            {cleanupHistoryError && (
+              <p className="error-text small" role="alert">
+                {cleanupHistoryError}
+              </p>
+            )}
+            {cleanupHistoryLoading ? (
+              <p className="small muted">正在读取清理记录…</p>
+            ) : cleanupHistoryError && cleanupHistory.length === 0 ? null : (
+              <CleanupHistory records={cleanupHistory} />
+            )}
+          </div>
+          <div className="modal-footer">
+            <button
+              className="button secondary"
+              onClick={() => setCleanupHistoryOpen(false)}
+            >
+              关闭
+            </button>
+            <button
+              className="button primary"
+              disabled={!native}
+              onClick={openRecycleBin}
+            >
+              <Trash2 size={15} />
+              打开系统回收站
             </button>
           </div>
         </Modal>
